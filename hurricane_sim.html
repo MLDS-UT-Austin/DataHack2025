@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Hurricane Simulator (Classic Perlin, No Simplex)</title>
+
+  <!-- React 18 (development) -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+
+  <!-- Babel (in-browser transformer for dev) -->
+  <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+
+  <!-- Tailwind CDN (development use only) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useRef, useEffect } = React;
+
+    // -----------------------
+    // 1) SEEDED RANDOM
+    // -----------------------
+    function createSeededRandom(seed) {
+      let s = seed >>> 0;
+      return function () {
+        // xorshift
+        s ^= s << 13;
+        s ^= s >>> 17;
+        s ^= s << 5;
+        // scale to [0,1)
+        return (s >>> 0) / 4294967296;
+      };
+    }
+
+    // -----------------------
+    // 2) CLASSIC PERLIN NOISE
+    // -----------------------
+    function fade(t) {
+      return t * t * t * (t * (t * 6 - 15) + 10);
+    }
+    function lerp(a, b, t) {
+      return a + t * (b - a);
+    }
+    function dotGradient(grad2D, gx, gy, x, y) {
+      const dx = x - gx;
+      const dy = y - gy;
+      const g = grad2D[gx][gy];
+      return dx * g[0] + dy * g[1];
+    }
+    function perlin2D(grad2D, x, y) {
+      const x0 = Math.floor(x);
+      const x1 = x0 + 1;
+      const y0 = Math.floor(y);
+      const y1 = y0 + 1;
+
+      const sx = x - x0;
+      const sy = y - y0;
+
+      const u = fade(sx);
+      const v = fade(sy);
+
+      const n00 = dotGradient(grad2D, x0, y0, x, y);
+      const n10 = dotGradient(grad2D, x1, y0, x, y);
+      const ix0 = lerp(n00, n10, u);
+
+      const n01 = dotGradient(grad2D, x0, y1, x, y);
+      const n11 = dotGradient(grad2D, x1, y1, x, y);
+      const ix1 = lerp(n01, n11, u);
+
+      const val = lerp(ix0, ix1, v);
+      return val * (1.0 / 0.75);
+    }
+    function fractalPerlin2D(grad2D, x, y, octaves, persistence, scale) {
+      let total = 0;
+      let frequency = scale;
+      let amplitude = 1;
+      let maxValue = 0;
+      for (let i = 0; i < octaves; i++) {
+        const val = perlin2D(grad2D, x * frequency, y * frequency);
+        total += val * amplitude;
+        maxValue += amplitude;
+        amplitude *= persistence;
+        frequency *= 2;
+      }
+      return total / maxValue;
+    }
+
+    // -----------------------
+    // 3) REACT SIMULATOR
+    // -----------------------
+    function HurricaneSimulator() {
+      const MAP_SIZE = 200;
+      const canvasSize = 600;
+      const scale = canvasSize / MAP_SIZE;
+
+      const [steps, setSteps] = useState(1000);
+      const [isRunning, setIsRunning] = useState(false);
+      const [totalRain, setTotalRain] = useState(0);
+
+      // Noise settings
+      const [heightOctaves, setHeightOctaves] = useState(4);
+      const [heightPersistence, setHeightPersistence] = useState(0.5);
+      const [heightScale, setHeightScale] = useState(0.01);
+
+      const [pressureOctaves, setPressureOctaves] = useState(4);
+      const [pressurePersistence, setPressurePersistence] = useState(0.5);
+      const [pressureScale, setPressureScale] = useState(0.01);
+
+      // Refs for gradient arrays
+      const heightGradRef = useRef(null);
+      const pressureGradRef = useRef(null);
+      const tempGradRef = useRef(null);
+
+      // Refs for the actual fields
+      const heightMapRef = useRef(null);
+      const pressureMapRef = useRef(null);
+      const temperatureMapRef = useRef(null);
+      const waterMapRef = useRef(null);
+      const flowFieldRef = useRef(null);
+
+      const hurricaneRef = useRef({
+        x: MAP_SIZE - 1,
+        y: MAP_SIZE / 2,
+        mass: 10,
+        vx: -0.1,
+        vy: 0
+      });
+
+      const stepCountRef = useRef(0);
+
+      // Initialize on mount
+      useEffect(() => {
+        resetSimulation();
+      }, []);
+
+      // Animation loop
+      useEffect(() => {
+        let animationId;
+        function simulateStep() {
+          if (!isRunning) return;
+          if (stepCountRef.current >= steps) {
+            setIsRunning(false);
+            return;
+          }
+          updateHurricane();
+          renderScene();
+          stepCountRef.current += 1;
+          animationId = requestAnimationFrame(simulateStep);
+        }
+        if (isRunning) {
+          animationId = requestAnimationFrame(simulateStep);
+        }
+        return () => {
+          if (animationId) cancelAnimationFrame(animationId);
+        };
+      }, [isRunning, steps]);
+
+      function initGradientArray(size, seed) {
+        const rand = createSeededRandom(seed);
+        const grad = Array.from({ length: size + 1 }, () => new Array(size + 1));
+        for (let x = 0; x <= size; x++) {
+          for (let y = 0; y <= size; y++) {
+            const angle = rand() * 2 * Math.PI;
+            grad[x][y] = [Math.cos(angle), Math.sin(angle)];
+          }
+        }
+        return grad;
+      }
+
+      // UPDATED to accept seeds
+      function generateEnvironment(
+        heightSeed,
+        pressureSeed,
+        tempSeed
+      ) {
+        // Build gradient arrays with the newly passed seeds
+        heightGradRef.current = initGradientArray(MAP_SIZE, heightSeed);
+        pressureGradRef.current = initGradientArray(MAP_SIZE, pressureSeed);
+        tempGradRef.current = initGradientArray(MAP_SIZE, tempSeed);
+
+        const heightMap = Array.from({ length: MAP_SIZE }, () => new Array(MAP_SIZE).fill(0));
+        const pressureMap = Array.from({ length: MAP_SIZE }, () => new Array(MAP_SIZE).fill(0));
+        const temperatureMap = Array.from({ length: MAP_SIZE }, () => new Array(MAP_SIZE).fill(0));
+        const waterMap = Array.from({ length: MAP_SIZE }, () => new Array(MAP_SIZE).fill(0));
+
+        // 1) Height map
+        for (let x = 0; x < MAP_SIZE; x++) {
+          for (let y = 0; y < MAP_SIZE; y++) {
+            let baseHeight;
+            const fraction1 = MAP_SIZE / 3;
+            if (x <= fraction1) {
+              baseHeight = 500 - (500 * (x / fraction1));
+            } else {
+              baseHeight = 0 - 500 * ((x - fraction1) / (MAP_SIZE - fraction1));
+            }
+            const nVal = fractalPerlin2D(
+              heightGradRef.current,
+              x, y,
+              heightOctaves, heightPersistence, heightScale
+            );
+            const noiseVal = nVal * 200;
+            heightMap[x][y] = baseHeight + noiseVal;
+          }
+        }
+
+        // 2) Pressure map
+        for (let x = 0; x < MAP_SIZE; x++) {
+          for (let y = 0; y < MAP_SIZE; y++) {
+            let basePressure = 0;
+            const cutoff = Math.floor(MAP_SIZE * 0.25);
+            if (x >= cutoff) {
+              const range = (MAP_SIZE - 1) - cutoff;
+              const dist = x - cutoff;
+              const slope = 500 / range;
+              basePressure = slope * dist;
+            }
+            const pValNoise = fractalPerlin2D(
+              pressureGradRef.current,
+              x + 1000, y + 1000,
+              pressureOctaves, pressurePersistence, pressureScale
+            ) * 100;
+            let pVal = basePressure + pValNoise;
+            const heightContribution = Math.max(0, heightMap[x][y] * 0.1);
+            pVal += heightContribution;
+            pressureMap[x][y] = pVal;
+          }
+        }
+
+        // 3) Temperature map
+        for (let x = 0; x < MAP_SIZE; x++) {
+          for (let y = 0; y < MAP_SIZE; y++) {
+            const tVal = fractalPerlin2D(
+              tempGradRef.current,
+              x, y,
+              2, 0.5, 0.003
+            ) * 20;
+            temperatureMap[x][y] = 80 + tVal;
+          }
+        }
+
+        // 5) Water map
+        for (let x = 0; x < MAP_SIZE; x++) {
+          for (let y = 0; y < MAP_SIZE; y++) {
+            waterMap[x][y] = (heightMap[x][y] <= 0) ? 1 : 0;
+          }
+        }
+
+        // 4) Flow field => gradient of pressure
+        const flowField = Array.from({ length: MAP_SIZE }, () =>
+          new Array(MAP_SIZE).fill({ x: 0, y: 0 })
+        );
+        for (let x = 0; x < MAP_SIZE; x++) {
+          for (let y = 0; y < MAP_SIZE; y++) {
+            if (x === 0 || x === MAP_SIZE - 1 || y === 0 || y === MAP_SIZE - 1) {
+              const dx = (MAP_SIZE / 2) - x;
+              const dy = (MAP_SIZE / 2) - y;
+              const mag = Math.sqrt(dx * dx + dy * dy);
+              flowField[x][y] = mag === 0
+                ? { x: 0, y: 0 }
+                : { x: dx / mag, y: dy / mag };
+              continue;
+            }
+            const px1 = pressureMap[x + 1][y];
+            const px2 = pressureMap[x - 1][y];
+            const py1 = pressureMap[x][y + 1];
+            const py2 = pressureMap[x][y - 1];
+            const gradX = (px2 - px1) / 2;
+            const gradY = (py2 - py1) / 2;
+            flowField[x][y] = { x: gradX, y: gradY };
+          }
+        }
+
+        // Store references
+        heightMapRef.current = heightMap;
+        pressureMapRef.current = pressureMap;
+        temperatureMapRef.current = temperatureMap;
+        waterMapRef.current = waterMap;
+        flowFieldRef.current = flowField;
+      }
+
+      // UPDATED resetSimulation to generate new random seeds on each reset
+      function resetSimulation() {
+        // Create some random seeds every time we reset
+        const heightSeed = Math.floor(Math.random() * 1000000);
+        const pressureSeed = Math.floor(Math.random() * 1000000);
+        const tempSeed = Math.floor(Math.random() * 1000000);
+
+        // Pass these seeds to generateEnvironment
+        generateEnvironment(heightSeed, pressureSeed, tempSeed);
+
+        hurricaneRef.current = {
+          x: MAP_SIZE - 1,
+          y: MAP_SIZE / 2,
+          mass: 10,
+          vx: -0.1,
+          vy: 0
+        };
+        stepCountRef.current = 0;
+        setTotalRain(0);
+        setIsRunning(false);
+        renderScene();
+      }
+
+      function updateHurricane() {
+        if (!temperatureMapRef.current) return;
+        const hx = hurricaneRef.current.x;
+        const hy = hurricaneRef.current.y;
+        const { vx, vy, mass } = hurricaneRef.current;
+        const { flowX, flowY } = sampleFlow(hx, hy);
+
+        const ax = flowX / mass;
+        const ay = flowY / mass;
+        const dragX = vx * Math.abs(vx);
+        const dragY = vy * Math.abs(vy);
+        hurricaneRef.current.vx += (ax - dragX);
+        hurricaneRef.current.vy += (ay - dragY);
+        hurricaneRef.current.x += hurricaneRef.current.vx;
+        hurricaneRef.current.y += hurricaneRef.current.vy;
+
+        if (hurricaneRef.current.x < 0) hurricaneRef.current.x = 0;
+        if (hurricaneRef.current.x > MAP_SIZE - 1) hurricaneRef.current.x = MAP_SIZE - 1;
+        if (hurricaneRef.current.y < 0) hurricaneRef.current.y = 0;
+        if (hurricaneRef.current.y > MAP_SIZE - 1) hurricaneRef.current.y = MAP_SIZE - 1;
+
+        const temp = sampleTemperature(hurricaneRef.current.x, hurricaneRef.current.y);
+        const wat = sampleWater(hurricaneRef.current.x, hurricaneRef.current.y);
+
+        if (wat === 1 && temp > 80) {
+          hurricaneRef.current.mass += 0.05;
+        } else {
+          hurricaneRef.current.mass -= 0.05;
+          if (hurricaneRef.current.mass < 2) {
+            hurricaneRef.current.mass = 2;
+          }
+        }
+        if (wat === 0) {
+          setTotalRain(prev => prev + hurricaneRef.current.mass * 10);
+        }
+      }
+
+      function sampleFlow(xx, yy) {
+        const flowField = flowFieldRef.current;
+        if (!flowField) return { flowX: 0, flowY: 0 };
+        const x0 = Math.floor(xx);
+        const y0 = Math.floor(yy);
+        if (x0 < 0 || x0 >= MAP_SIZE || y0 < 0 || y0 >= MAP_SIZE) {
+          return { flowX: 0, flowY: 0 };
+        }
+        return { flowX: flowField[x0][y0].x, flowY: flowField[x0][y0].y };
+      }
+      function sampleTemperature(xx, yy) {
+        const tMap = temperatureMapRef.current;
+        if (!tMap) return 80;
+        const x0 = Math.floor(xx);
+        const y0 = Math.floor(yy);
+        if (x0 < 0 || x0 >= MAP_SIZE || y0 < 0 || y0 >= MAP_SIZE) return 80;
+        const row = tMap[x0];
+        if (!row) return 80;
+        return row[y0] !== undefined ? row[y0] : 80;
+      }
+      function sampleWater(xx, yy) {
+        const wMap = waterMapRef.current;
+        if (!wMap) return 0;
+        const x0 = Math.floor(xx);
+        const y0 = Math.floor(yy);
+        if (x0 < 0 || x0 >= MAP_SIZE || y0 < 0 || y0 >= MAP_SIZE) return 0;
+        const row = wMap[x0];
+        if (!row) return 0;
+        return row[y0] !== undefined ? row[y0] : 0;
+      }
+
+      function renderScene() {
+        const canvas = document.getElementById('mapCanvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const heightMap = heightMapRef.current;
+        const waterMap = waterMapRef.current;
+        const flowField = flowFieldRef.current;
+        if (!heightMap || !waterMap || !flowField) return;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw terrain
+        for (let x = 0; x < MAP_SIZE; x++) {
+          const rowH = heightMap[x];
+          const rowW = waterMap[x];
+          for (let y = 0; y < MAP_SIZE; y++) {
+            if (rowW[y] === 1) {
+              ctx.fillStyle = 'rgba(0, 0, 255, 1)';
+            } else {
+              const h = rowH[y];
+              const ratio = Math.max(0, Math.min(1, (h + 500) / 1000));
+              const brown = [158, 134, 107];
+              const green = [82, 127, 74];
+              const r = Math.round(brown[0] + (green[0] - brown[0]) * ratio);
+              const g = Math.round(brown[1] + (green[1] - brown[1]) * ratio);
+              const b = Math.round(brown[2] + (green[2] - brown[2]) * ratio);
+              ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+            }
+            ctx.fillRect(x * scale, y * scale, scale, scale);
+          }
+        }
+
+        // Draw flow field arrows
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.lineWidth = 1;
+        const step = 10;
+        for (let x = 0; x < MAP_SIZE; x += step) {
+          for (let y = 0; y < MAP_SIZE; y += step) {
+            const f = flowField[x][y];
+            const startX = x * scale + scale / 2;
+            const startY = y * scale + scale / 2;
+            const endX = startX + f.x * 5;
+            const endY = startY + f.y * 5;
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+
+            const angle = Math.atan2(endY - startY, endX - startX);
+            const arrowSize = 5;
+            ctx.beginPath();
+            ctx.moveTo(endX, endY);
+            ctx.lineTo(
+              endX - arrowSize * Math.cos(angle - Math.PI / 6),
+              endY - arrowSize * Math.sin(angle - Math.PI / 6)
+            );
+            ctx.lineTo(
+              endX - arrowSize * Math.cos(angle + Math.PI / 6),
+              endY - arrowSize * Math.sin(angle + Math.PI / 6)
+            );
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.fill();
+          }
+        }
+
+        // Draw hurricane
+        const { x: hx, y: hy, mass } = hurricaneRef.current;
+        const centerX = hx * scale + scale / 2;
+        const centerY = hy * scale + scale / 2;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, mass, 0, 2 * Math.PI);
+        ctx.fillStyle = 'white';
+        ctx.fill();
+      }
+
+      function handleApplyNoise() {
+        resetSimulation();
+      }
+
+      return (
+        <div className="flex flex-col items-start p-4 gap-4">
+          <div className="flex gap-2 items-center flex-wrap">
+            <label>Number of timesteps:</label>
+            <input
+              type="number"
+              className="border rounded p-1"
+              value={steps}
+              onChange={(e) => setSteps(parseInt(e.target.value) || 0)}
+            />
+            <button
+              className="bg-blue-500 text-white px-3 py-1 rounded-lg shadow"
+              onClick={() => setIsRunning(true)}
+            >
+              Start Simulation
+            </button>
+            <button
+              className="bg-gray-500 text-white px-3 py-1 rounded-lg shadow"
+              onClick={resetSimulation}
+            >
+              Reset Simulation
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <p>Steps simulated: {stepCountRef.current}</p>
+            <p>Total Rain: {totalRain.toFixed(2)}</p>
+          </div>
+
+          <div className="flex gap-2">
+            <div className="flex flex-col gap-2 border p-2 rounded-lg">
+              <h3 className="font-bold">Height Noise Settings</h3>
+              <label>Octaves:
+                <input
+                  type="number"
+                  className="border rounded p-1 ml-2 w-16"
+                  value={heightOctaves}
+                  onChange={(e) => setHeightOctaves(parseInt(e.target.value) || 1)}
+                />
+              </label>
+              <label>Persistence:
+                <input
+                  type="number"
+                  step="0.1"
+                  className="border rounded p-1 ml-2 w-16"
+                  value={heightPersistence}
+                  onChange={(e) => setHeightPersistence(parseFloat(e.target.value) || 0.1)}
+                />
+              </label>
+              <label>Scale:
+                <input
+                  type="number"
+                  step="0.001"
+                  className="border rounded p-1 ml-2 w-16"
+                  value={heightScale}
+                  onChange={(e) => setHeightScale(parseFloat(e.target.value) || 0.001)}
+                />
+              </label>
+            </div>
+
+            <div className="flex flex-col gap-2 border p-2 rounded-lg">
+              <h3 className="font-bold">Pressure Noise Settings</h3>
+              <label>Octaves:
+                <input
+                  type="number"
+                  className="border rounded p-1 ml-2 w-16"
+                  value={pressureOctaves}
+                  onChange={(e) => setPressureOctaves(parseInt(e.target.value) || 1)}
+                />
+              </label>
+              <label>Persistence:
+                <input
+                  type="number"
+                  step="0.1"
+                  className="border rounded p-1 ml-2 w-16"
+                  value={pressurePersistence}
+                  onChange={(e) => setPressurePersistence(parseFloat(e.target.value) || 0.1)}
+                />
+              </label>
+              <label>Scale:
+                <input
+                  type="number"
+                  step="0.001"
+                  className="border rounded p-1 ml-2 w-16"
+                  value={pressureScale}
+                  onChange={(e) => setPressureScale(parseFloat(e.target.value) || 0.001)}
+                />
+              </label>
+            </div>
+          </div>
+
+          <button
+            className="bg-green-500 text-white px-3 py-1 rounded-lg shadow"
+            onClick={handleApplyNoise}
+          >
+            Apply Noise Settings
+          </button>
+
+          <canvas
+            id="mapCanvas"
+            width={canvasSize}
+            height={canvasSize}
+            className="border border-gray-300 rounded"
+          />
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<HurricaneSimulator />);
+  </script>
+</body>
+</html>
