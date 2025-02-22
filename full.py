@@ -32,19 +32,21 @@ damping = 0.02
 noise_amplitude = 0.01
 noise_scale = 0.05
 tail_length = 10.0
-spawn_rate = 50
+spawn_rate = 100
 
 # Thermal parameters
 D_const = 0.0
 k_const = 0.0007
 # dpdt = 300.0
-dpdt = 3000.0
+dpdt = 30000.0
 vc = 1.0
-d_max = 0.01
+d_max = 0.005
 
 # Hurricane control (defaults from JS sliders)
-hurricane_divergence_rate = 0.02
+hurricane_divergence_rate = 0.01
 hurricane_growth_rate = 0.01
+
+GLOBAL_WIND = 0.0
 
 # ---------------------------
 # Data Arrays and Initialization
@@ -201,6 +203,7 @@ def get_velocity_at(gx, gy):
     v11 = cell_velocity(i + 1, j + 1)
     ux = (1 - di) * (1 - dj) * v00[0] + di * (1 - dj) * v10[0] + (1 - di) * dj * v01[0] + di * dj * v11[0]
     uy = (1 - di) * (1 - dj) * v00[1] + di * (1 - dj) * v10[1] + (1 - di) * dj * v01[1] + di * dj * v11[1]
+    ux += GLOBAL_WIND
     return ux, uy
 
 # ---------------------------
@@ -297,9 +300,13 @@ def step_lbm(dt_step, f, f_temp, air_temp, sim_step_count, hurricane_ids, hurric
                     dy = (cy + 0.5) - h_y
                     dist = math.sqrt(dx * dx + dy * dy)
                     if dist < h_radius:
-                        # effect = hurricane_divergence_rate * (1 - dist / h_radius)
-                        effect = hurricane_divergence_rate * (dist / h_radius) ** 2
-                        S_array[cy, cx] -= effect
+                        # if dist < h_radius / 2:
+                        #     effect = hurricane_divergence_rate
+                        # else:
+                        #     temp = (dist -h_radius / 2)/ (h_radius/2)
+                        #     effect = hurricane_divergence_rate * (1 - temp **2)
+                        effect = hurricane_divergence_rate * (1 - (dist / h_radius) ** 2)
+                        S_array[cy, cx] = - effect
     # (6) Collision step
     for j in range(NY):
         for i in range(NX):
@@ -328,7 +335,7 @@ def update_hurricanes(dt):
     hurricane_spawn_acc += dt * steps_per_frame
     spawn_threshold = 20  # using a default value (steps per spawn inverse)
     # while hurricane_spawn_acc >= spawn_threshold:
-    while len(hurricane_ids) < 2:
+    while len(hurricane_ids) < 1:
         idx = random.randint(0, NX * NY - 1)
         j = idx // NX
         i = idx % NX
@@ -354,28 +361,27 @@ def update_hurricanes(dt):
             else:
                 h_radius -= hurricane_growth_rate
             # Average velocity inside hurricane radius
-            sum_ux, sum_uy, count = 0.0, 0.0, 0
-            r = int(math.ceil(h_radius))
-            for dj in range(-r, r + 1):
-                for di in range(-r, r + 1):
-                    cx = i + di
-                    cy = j + dj
-                    if 0 <= cx < NX and 0 <= cy < NY:
-                        if math.sqrt(di * di + dj * dj) <= h_radius:
-                            ux, uy = get_velocity_at(cx, cy)
-                            sum_ux += ux
-                            sum_uy += uy
-                            count += 1
-            if count > 0:
-                avg_ux = sum_ux / count
-                avg_uy = sum_uy / count
-                h_x += avg_ux * dt * 25
-                h_y += avg_uy * dt * 25
-                # Wrap around periodic boundaries
-                if h_x < 0: h_x += NX
-                if h_y < 0: h_y += NY
-                if h_x >= NX: h_x -= NX
-                if h_y >= NY: h_y -= NY
+            # sum_ux, sum_uy, count = 0.0, 0.0, 0
+            # r = int(math.ceil(h_radius))
+            # for dj in range(-r, r + 1):
+            #     for di in range(-r, r + 1):
+            #         cx = i + di
+            #         cy = j + dj
+            #         if 0 <= cx < NX and 0 <= cy < NY:
+            #             if math.sqrt(di * di + dj * dj) <= h_radius:
+            #                 ux, uy = get_velocity_at(cx, cy)
+            #                 sum_ux += ux
+            #                 sum_uy += uy
+            #                 count += 1
+            # if count > 0:
+            avg_ux, avg_uy = get_velocity_at(h_x, h_y)
+            h_x += avg_ux * dt * 10
+            h_y += avg_uy * dt * 10
+            # Wrap around periodic boundaries
+            if h_x < 0: h_x += NX
+            if h_y < 0: h_y += NY
+            if h_x >= NX: h_x -= NX
+            if h_y >= NY: h_y -= NY
         hurricane_x[h_index] = h_x
         hurricane_y[h_index] = h_y
         hurricane_radius[h_index] = h_radius
