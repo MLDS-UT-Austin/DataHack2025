@@ -44,7 +44,7 @@ d_max = 0.005
 
 # Hurricane control (defaults from JS sliders)
 hurricane_divergence_rate = 0.01
-hurricane_growth_rate = 0.01
+hurricane_growth_rate = 100
 
 GLOBAL_WIND = 0.0
 
@@ -69,7 +69,18 @@ air_temp = np.zeros((NY, NX), dtype=np.float32)
 
 # Land map and cities (land_map: 0=water, 1=land)
 land_map = np.zeros((NY, NX), dtype=np.uint8)
-cities = []  # list of dicts with keys "x" and "y"
+
+
+cities = [
+    dict(name="Sparseville", x=63, y=35),
+    dict(name="Tensorburg", x=214, y=378),
+    dict(name="Bayes Bay", x=160, y=262),
+    dict(name="ReLU Ridge", x=413, y=23),
+    dict(name="GANopolis", x=318, y=132),
+    dict(name="Gradient Grove", x=468, y=158),
+    dict(name="Offshore A", x=502, y=356),
+    dict(name="Offshore B", x=660, y=184),
+]
 
 # Hurricane variables
 hurricane_ids = List.empty_list(int32)
@@ -83,7 +94,9 @@ hurricane_records = []  # log of hurricanes (updated periodically)
 # Time and seasonal effects
 current_month = 0
 current_year = 1955
-seasonal_effects = np.zeros(12, dtype=np.float32)  # default all 0
+seasonal_effects = np.array(
+    [0.0, 0.1, 0.4, 0.5, 0.6, 0.8, 1.0, 1.1, 0.7, 0.4, 0.2, 0.0], dtype=np.float32
+)  # default all 0
 
 # Particle system (for flow visualization)
 particles = []
@@ -166,12 +179,30 @@ perlin = PerlinNoise()
 def perlin2(x, y):
     return perlin.noise(x, y, 0)
 
-def generate_base_map(amplitude, scale):
+def gen_perlin(amplitude, scale, seed=None):
+    if seed is not None:
+        rng = random.Random(seed)
+    else:
+        rng = random
+    x_offset = rng.random() * 1000
+    y_offset = rng.random() * 1000
+    output = np.zeros((NY, NX), dtype=np.float32)
     for j in range(NY):
         for i in range(NX):
-            base_map[j, i] = perlin2(i * scale, j * scale) * amplitude
+            output[j, i] = perlin2(i * scale+x_offset, j * scale+ y_offset) * amplitude
+    return output
 
-generate_base_map(0.01, noise_scale)
+base_map = gen_perlin(0.01, noise_scale)
+seasonal_map = gen_perlin(0.01, 0.02)
+land_map = gen_perlin(0.01, 0.02, seed=0) + gen_perlin(0.01, 0.005, seed=0)
+
+# center = (75, 50)
+# for j in range(NY):
+#     for i in range(NX):
+#         dist = math.sqrt((i - center[0]) ** 2 + (j - center[1]) ** 2)
+#         if dist < 5:
+#             land_map[j, i] = 1
+land_map = np.where(land_map > 0.005, 1, 0)
 
 # ---------------------------
 # Helper Functions
@@ -212,7 +243,7 @@ def get_velocity_at(gx, gy):
 sim_step_count = 0
 
 @numba.jit
-def step_lbm(dt_step, f, f_temp, air_temp, sim_step_count, hurricane_ids, hurricane_x, hurricane_y, hurricane_radius):
+def step_lbm(dt_step, f, f_temp, air_temp, sim_step_count, hurricane_ids, hurricane_x, hurricane_y, hurricane_radius, current_month:int):
     # (1) Compute macroscopic variables and equilibrium distribution
     feq = np.empty_like(f)
     cell_vel = [[(0, 0) for _ in range(NX)] for _ in range(NY)]
@@ -334,8 +365,7 @@ def update_hurricanes(dt):
     global hurricane_spawn_acc, next_hurricane_id, hurricane_records, hurricane_ids, hurricane_x, hurricane_y, hurricane_radius
     hurricane_spawn_acc += dt * steps_per_frame
     spawn_threshold = 20  # using a default value (steps per spawn inverse)
-    # while hurricane_spawn_acc >= spawn_threshold:
-    while len(hurricane_ids) < 1:
+    if len(hurricane_ids) < 1:
         idx = random.randint(0, NX * NY - 1)
         j = idx // NX
         i = idx % NX
@@ -360,6 +390,7 @@ def update_hurricanes(dt):
                 h_radius += hurricane_growth_rate * air_temp[j, i]
             else:
                 h_radius -= hurricane_growth_rate
+            h_radius = min(20, h_radius)
             # Average velocity inside hurricane radius
             # sum_ux, sum_uy, count = 0.0, 0.0, 0
             # r = int(math.ceil(h_radius))
@@ -385,11 +416,11 @@ def update_hurricanes(dt):
         hurricane_x[h_index] = h_x
         hurricane_y[h_index] = h_y
         hurricane_radius[h_index] = h_radius
-        if h_radius < 2.5:
-            hurricane_ids.remove(h_index)
-            hurricane_x.remove(h_index)
-            hurricane_y.remove(h_index)
-            hurricane_radius.remove(h_index)
+        if h_radius < 1.0:
+            hurricane_ids.pop(h_index)
+            hurricane_x.pop(h_index)
+            hurricane_y.pop(h_index)
+            hurricane_radius.pop(h_index)
         
     if sim_step_count % 1000 < steps_per_frame:
         for i in range(len(hurricane_ids)):
@@ -428,7 +459,7 @@ def update_particles(dt):
 # Pygame Setup
 # ---------------------------
 pygame.init()
-screen = pygame.display.set_mode((NX * cell_size, NY * cell_size))
+screen = pygame.display.set_mode((NX * cell_size, NY * cell_size), depth=32)
 pygame.display.set_caption("LBM Fluid Simulation – Python Port")
 clock = pygame.time.Clock()
 
@@ -451,18 +482,29 @@ while running:
 
     if not paused:
         for _ in range(steps_per_frame):
-            f, f_temp, air_temp, sim_step_count, hurricane_ids, hurricane_x, hurricane_y, hurricane_radius = step_lbm(dt, f, f_temp, air_temp, sim_step_count, hurricane_ids, hurricane_x, hurricane_y, hurricane_radius)
+            f, f_temp, air_temp, sim_step_count, hurricane_ids, hurricane_x, hurricane_y, hurricane_radius = step_lbm(dt, f, f_temp, air_temp, sim_step_count, hurricane_ids, hurricane_x, hurricane_y, hurricane_radius, int(current_month % 12))
         update_hurricanes(dt)
         update_particles(dt)
-
-    # Drawing: here we draw the ground temperature map as a grayscale image
+    current_month += dt *0.2
+    
+    # Draw land map (blue for water, green for land)
     for j in range(NY):
         for i in range(NX):
-            # Compute temperature value from base and edit maps (ignoring seasonal for simplicity)
-            T = base_map[j, i] + edit_map[j, i]
-            col = int(((T + 0.02) / 0.04) * 255)
-            col = max(0, min(255, col))
-            pygame.draw.rect(screen, (col, col, col), (i * cell_size, j * cell_size, cell_size, cell_size))
+            # Compute temperature value
+            T = base_map[j, i] + edit_map[j, i] + seasonal_effects[int(current_month % 12)] * seasonal_map[j, i]
+            # T =  seasonal_effects[int(current_month % 12)] * seasonal_map[j, i]
+            scale = ((T + 0.02) / 0.04)
+            scale = max(0, min(1, scale))
+
+
+            if land_map[j, i] == 0:
+                color = (0, 0, 255*scale)  # Blue for water
+            else:
+                color = (0, 255*scale, 0)  # Blue for water
+
+            pygame.draw.rect(screen, color, (i * cell_size, j * cell_size, cell_size, cell_size))
+
+
     # Draw hurricanes (red circles)
     for i in range(len(hurricane_ids)):
         h_x = hurricane_x[i]
@@ -478,9 +520,18 @@ while running:
                 x0, y0, _ = p["trail"][start]
                 x1, y1, _ = p["trail"][start + 1]
                 if abs(x0 - x1) < NX * cell_size / 2 and abs(y0 - y1) < NY * cell_size / 2:
-                    pygame.draw.line(screen, (0, 255, 0),
+                    pygame.draw.line(screen, (190, 190, 190),
                                     (int(x0), int(y0)),
                                     (int(x1), int(y1)), 1)
+                    
+    # Draw cities
+    for city in cities:
+        x = city["x"]
+        y = city["y"]
+        pygame.draw.circle(screen, (255, 255, 255), (x, y), 5)
+        font = pygame.font.Font(None, 24)
+        text = font.render(city["name"], True, (255, 255, 255))
+        screen.blit(text, (x + 10, y - 10))
 
     pygame.display.flip()
     clock.tick(60)
