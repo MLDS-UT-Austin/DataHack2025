@@ -1,4 +1,5 @@
 import math
+import pickle
 import random
 import time
 
@@ -7,6 +8,8 @@ import numpy as np
 import pygame
 from numba.typed import List
 from numba.types import float32, int32
+
+from identify_hurricanes import identify_hurricanes
 
 # ---------------------------
 # Simulation Parameters
@@ -393,10 +396,11 @@ def step_lbm(dt_step, f, f_temp, air_temp, sim_step_count, hurricane_ids, hurric
     return f, f_temp, air_temp, sim_step_count, hurricane_ids, hurricane_x, hurricane_y, hurricane_radius, base_map, edit_map, seasonal_map
 
 def update_hurricanes(dt):
+    return
     global hurricane_spawn_acc, next_hurricane_id, hurricane_records, hurricane_ids, hurricane_x, hurricane_y, hurricane_radius
     hurricane_spawn_acc += dt * steps_per_frame
     spawn_threshold = 20  # using a default value (steps per spawn inverse)
-    if len(hurricane_ids) < 1:
+    if len(hurricane_ids) < 0:
         idx = random.randint(0, NX * NY - 1)
         j = idx // NX
         i = idx % NX
@@ -471,7 +475,7 @@ def update_particles(dt):
         gx = p["x"] / cell_size
         gy = p["y"] / cell_size
         vx, vy = get_velocity_at(gx, gy)
-        p["x"] += vx * speed_factor * dt + GLOBAL_WIND * dt
+        p["x"] += vx * speed_factor * dt
         p["y"] += vy * speed_factor * dt
         # Periodic boundaries
         if p["x"] < 0: p["x"] += NX * cell_size
@@ -485,6 +489,22 @@ def update_particles(dt):
     while particle_spawn_acc >= 1:
         spawn_particle()
         particle_spawn_acc -= 1
+
+@numba.jit
+def get_velocity_field(f):
+    x_vel = np.zeros((NY, NX), dtype=np.float32)
+    y_vel = np.zeros((NY, NX), dtype=np.float32)
+    def cell_velocity(i, j):
+        rho = np.sum(f[j, i, :])
+        ux = np.sum(f[j, i, :] * ex)
+        uy = np.sum(f[j, i, :] * ey)
+        return ux / rho, uy / rho
+    
+
+    for j in range(NY):
+        for i in range(NX):
+            x_vel[j, i], y_vel[j, i] = cell_velocity(i, j)
+    return x_vel, y_vel
 
 # ---------------------------
 # Pygame Setup
@@ -501,9 +521,46 @@ last_time = time.time()
 # ---------------------------
 # Main Simulation Loop
 # ---------------------------
+
+
+with open("data.pkl", "rb") as file:
+    data = pickle.load(file)
+    f = data["f"]
+    f_temp = data["f_temp"]
+    air_temp = data["air_temp"]
+    sim_step_count = data["sim_step_count"]
+    base_map = data["base_map"]
+    edit_map = data["edit_map"]
+    seasonal_map = data["seasonal_map"]
+    current_month = data["current_month"]
+    current_year = data["current_year"]
+    seasonal_effects = data["seasonal_effects"]
+    particles = data["particles"]
+    cities = data["cities"]
+    land_map = data["land_map"]
+
 while running:
-    dt = time.time() - last_time
-    last_time = time.time()
+    # with open("data.pkl", "wb") as file:
+    #     data = {
+    #         "f": f,
+    #         "f_temp": f_temp,
+    #         "air_temp": air_temp,
+    #         "sim_step_count": sim_step_count,
+    #         "base_map": base_map,
+    #         "edit_map": edit_map,
+    #         "seasonal_map": seasonal_map,
+    #         "current_month": current_month,
+    #         "current_year": current_year,
+    #         "seasonal_effects": seasonal_effects,
+    #         "particles": particles,
+    #         "cities": cities,
+    #         "land_map": land_map,
+    #     }
+    #     # data = {k:np.array(v) if isinstance(v, np.ndarray) else v for k,v in data.items()}
+    #     pickle.dump(data, file)
+
+
+    dt = 0.08
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
@@ -537,13 +594,28 @@ while running:
 
 
     # Draw hurricanes (red circles)
-    for i in range(len(hurricane_ids)):
-        h_x = hurricane_x[i]
-        h_y = hurricane_y[i]
-        h_radius = hurricane_radius[i]
-        pygame.draw.circle(screen, (255, 0, 0),
+    # Identify hurricanes using the imported function
+    x_vel, y_vel = get_velocity_field(f)
+    h_centers, h_sizes, h_indicator = identify_hurricanes(x_vel, y_vel, threshold=0.01)
+
+    h_indicator /= 0.01
+
+    
+    # draw h_indicator grid
+    for j in range(NY):
+        for i in range(NX):
+            scale = ((h_indicator[j, i] + 0.02) / 0.04)
+            scale = max(0, min(1, scale))
+            color = (100*scale, 100*scale, 100*scale)
+            pygame.draw.rect(screen, color, (i * cell_size, j * cell_size, cell_size, cell_size))
+    
+    for (h_y, h_x), h_radius in zip(h_centers, h_sizes):
+        h_radius *= 200
+        # print(h_x, h_y, h_radius)
+        pygame.draw.circle(screen, (0, 255, 0),
                            (int(h_x * cell_size), int(h_y * cell_size)),
                            int(h_radius * cell_size), 1)
+        
     # Draw particle trails (green lines)
     for p in particles:
         if len(p["trail"]) > 1:

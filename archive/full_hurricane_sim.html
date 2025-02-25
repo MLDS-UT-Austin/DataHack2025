@@ -1,0 +1,1746 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>LBM Fluid Simulation – Thermal Forcing with Temperature Memory</title>
+  <style>
+    body {
+      margin: 0;
+      background: #222;
+      color: #eee;
+      font-family: sans-serif;
+      user-select: none;
+    }
+    #controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 20;
+      background: rgba(0,0,0,0.85);
+      padding: 10px;
+      border-radius: 4px;
+      max-width: 320px;
+    }
+    #controls > div {
+      margin-bottom: 5px;
+    }
+    /* Editor controls; hidden by default */
+    .editorControls {
+      display: none;
+      margin-top: 10px;
+      border-top: 1px solid #555;
+      padding-top: 10px;
+    }
+    canvas {
+      display: block;
+      margin: 0 auto;
+      background: #000;
+    }
+    label { font-size: 0.9em; }
+    /* Seasonal slider canvas styling */
+    #seasonalSliderCanvas {
+      background: #333;
+      margin-top: 10px;
+      display: block;
+    }
+    /* Time display in top right */
+    #timeDisplay {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      color: #eee;
+      background: rgba(0,0,0,0.5);
+      padding: 5px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+<div id="timeDisplay">1955 - Jan</div>
+<div id="controls">
+  <!-- Simulation & Thermal Controls -->
+  <div>
+    <label>
+      Viscosity:
+      <input type="range" id="viscosity" min="0.01" max="0.2" step="0.005" value="0.04">
+    </label>
+    <span id="viscLabel">0.040</span>
+  </div>
+  <div>
+    <label>
+      Damping:
+      <input type="range" id="damping" min="0" max="0.1" step="0.005" value="0.02">
+    </label>
+    <span id="dampLabel">0.020</span>
+  </div>
+  <div>
+    <label>
+      Noise Amplitude:
+      <input type="range" id="noiseAmplitude" min="0" max="0.2" step="0.001" value="0.01">
+    </label>
+    <span id="noiseAmpLabel">0.010</span>
+  </div>
+  <div>
+    <label>
+      Noise Scale:
+      <input type="range" id="noiseScale" min="0.001" max="1" step="0.001" value="0.05">
+    </label>
+    <span id="noiseScaleLabel">0.050</span>
+  </div>
+  <div>
+    <label>
+      Tail Length (sec):
+      <input type="range" id="tailLength" min="0.5" max="20" step="0.1" value="10">
+    </label>
+    <span id="tailLengthLabel">10.0</span>
+  </div>
+  <div>
+    <label>
+      Spawn Rate (particles/sec):
+      <input type="range" id="spawnRate" min="0" max="200" step="1" value="50">
+    </label>
+    <span id="spawnRateLabel">50</span>
+  </div>
+  <!-- Note: seasonalBlend slider is replaced by the multi–handle seasonal slider below -->
+  <!-- Thermal sliders: -->
+  <div>
+    <label>
+      Diffusion (D):
+      <input type="range" id="D_const" min="0.0" max="0.2" step="0.005" value="0.0">
+    </label>
+    <span id="D_constLabel">0.000</span>
+  </div>
+  <div>
+    <label>
+      Ground Conductivity (k):
+      <input type="range" id="k_const" min="0.0001" max="0.001" step="0.0001" value="0.0007">
+    </label>
+    <span id="k_constLabel">0.0007</span>
+  </div>
+  <div>
+    <label>
+      dpdt:
+      <input type="range" id="dpdt" min="100" max="10000" step="1" value="300">
+    </label>
+    <span id="dpdtLabel">300.00</span>
+  </div>
+  <div>
+    <label>
+      vc:
+      <input type="range" id="vc" min="0.1" max="20" step="0.1" value="1">
+    </label>
+    <span id="vcLabel">1</span>
+  </div>
+  <div>
+    <label>
+      d_max:
+      <input type="range" id="d_max" min="0" max="0.005" step="0.0001" value="0.001">
+    </label>
+    <span id="d_maxLabel">0.001</span>
+  </div>
+  <!-- Hurricane controls -->
+  <div>
+    <label>
+      Hurricane Growth Rate:
+      <input type="range" id="hurricaneGrowthRate" min="0" max="0.1" step="0.001" value="0.010">
+    </label>
+    <span id="hurricaneGrowthRateLabel">0.010</span>
+  </div>
+  <div>
+    <label>
+      Hurricane Divergence Rate:
+      <input type="range" id="hurricaneDivergenceRate" min="0" max="0.1" step="0.001" value="0.050">
+    </label>
+    <span id="hurricaneDivergenceRateLabel">0.050</span>
+  </div>
+  <div>
+    <label>
+      Hurricane Spawn Rate (steps per spawn inverse):
+      <input type="range" id="hurricaneSpawnRate" min="1000" max="20000" step="100" value="10000">
+    </label>
+    <span id="hurricaneSpawnRateLabel">10000</span>
+  </div>
+  <!-- Simulation control buttons -->
+  <div>
+    <button id="resetSim">Reset Sim</button>
+    <button id="pauseSim">Resume</button>
+    <!-- New Step Frame button -->
+    <button id="stepFrame">Step Frame</button>
+    <span id="stepCounter">Steps: 0</span>
+  </div>
+  <div>
+    <button id="toggleDivergence">Show Divergence</button>
+    <button id="toggleTemperature">Show Temperature</button>
+    <button id="toggleLandMap">Show Land Map</button>
+  </div>
+  <!-- Map Editor Toggles -->
+  <div>
+    <button id="enterOriginalEditor">Enter Map Editor</button>
+    <button id="enterSeasonalEditor">Enter Seasonal Map Editor</button>
+    <button id="enterLandEditor">Enter Land Map Editor</button>
+  </div>
+  <!-- Original Map Editor Controls -->
+  <div id="editorControls" class="editorControls">
+    <div>
+      <label>
+         Brush Size:
+         <input type="range" id="brushSize" min="1" max="20" step="1" value="5">
+      </label>
+      <span id="brushSizeLabel">5</span>
+    </div>
+    <div>
+      <label>
+         Brush Value:
+         <input type="range" id="brushValue" min="-0.06" max="0.06" step="0.0001" value="0.010">
+      </label>
+      <span id="brushValueLabel">0.010</span>
+    </div>
+    <div>
+      <label>
+         Brush Weight:
+         <input type="range" id="brushWeight" min="0" max="1" step="0.01" value="1">
+      </label>
+      <span id="brushWeightLabel">1.00</span>
+    </div>
+    <div>
+      <button id="clearPerlin">Clear Perlin</button>
+      <button id="clearEdit">Clear</button>
+      <button id="saveMap">Save Map</button>
+      <button id="loadMap">Load Map</button>
+      <button id="returnOriginal">Return</button>
+      <input type="file" id="loadMapInput" accept="image/png" style="display:none;">
+    </div>
+    <div style="font-size:0.8em; margin-top:5px;">
+      Paint ground temperature using the brush. The brush “pushes” the cell toward the brush target.
+    </div>
+  </div>
+  <!-- Seasonal Map Editor Controls -->
+  <div id="seasonalEditorControls" class="editorControls">
+    <div>
+      <label>
+         Brush Size:
+         <input type="range" id="s_brushSize" min="1" max="20" step="1" value="5">
+      </label>
+      <span id="s_brushSizeLabel">5</span>
+    </div>
+    <div>
+      <label>
+         Brush Value:
+         <input type="range" id="s_brushValue" min="-0.02" max="0.02" step="0.0001" value="0.010">
+      </label>
+      <span id="s_brushValueLabel">0.010</span>
+    </div>
+    <div>
+      <label>
+         Brush Weight:
+         <input type="range" id="s_brushWeight" min="0" max="1" step="0.01" value="1">
+      </label>
+      <span id="s_brushWeightLabel">1.00</span>
+    </div>
+    <div>
+      <button id="clearSeasonal">Clear</button>
+      <button id="saveSeasonal">Save Map</button>
+      <button id="loadSeasonal">Load Map</button>
+      <button id="returnSeasonal">Return</button>
+      <input type="file" id="loadSeasonalInput" accept="image/png" style="display:none;">
+    </div>
+    <div style="font-size:0.8em; margin-top:5px;">
+      Paint seasonal ground temperature using the brush.
+    </div>
+  </div>
+  <!-- Land Map Editor Controls -->
+  <div id="landEditorControls" class="editorControls">
+    <div>
+      <label>
+         Mode:
+         <select id="landEditorMode">
+           <option value="edit">Edit Land/Water</option>
+           <option value="place">Place City</option>
+           <option value="delete">Delete City</option>
+         </select>
+      </label>
+    </div>
+    <div id="landEditControls">
+      <label>
+        Brush Size:
+        <input type="range" id="landBrushSize" min="1" max="20" step="1" value="5">
+      </label>
+      <span id="landBrushSizeLabel">5</span>
+      <br>
+      <label>
+        Set to Land:
+        <input type="checkbox" id="setToLand" checked>
+      </label>
+    </div>
+    <div>
+      <button id="clearLandMap">Clear Land Map</button>
+      <button id="saveLandMap">Save Land Map</button>
+      <button id="loadLandMap">Load Land Map</button>
+      <input type="file" id="loadLandMapInput" accept="image/png" style="display:none;">
+      <button id="returnLand">Return</button>
+    </div>
+  </div>
+  <!-- System Settings and Save Results -->
+  <div>
+    <button id="saveSystemSettings">Save System Settings</button>
+    <button id="loadSystemSettings">Load System Settings</button>
+  </div>
+  <div>
+    <button id="saveResultsBtn">Save Results</button>
+  </div>
+  <!-- Seasonal Multi–Handle Slider -->
+  <div>
+    <canvas id="seasonalSliderCanvas" width="400" height="50"></canvas>
+    <div style="font-size:0.8em;">Drag the handles to set the seasonal effect for each month (applied to the seasonal map).</div>
+  </div>
+</div>
+<canvas id="canvas"></canvas>
+<script>
+  /***** Perlin Noise Implementation *****
+   * (Based on Ken Perlin’s improved noise algorithm.)
+   *****/
+  var PerlinNoise = {
+    permutation: [151,160,137,91,90,15,131,13,201,95,96,53,194,233,7,225,140,36,103,30,
+      69,142,8,99,37,240,21,10,23,190,6,148,247,120,234,75,0,26,197,62,94,252,219,203,117,35,
+      11,32,57,177,33,88,237,149,56,87,174,20,125,136,171,168,68,175,74,165,71,134,139,48,27,
+      166,77,146,158,231,83,111,229,122,60,211,133,230,220,105,92,41,55,46,245,40,244,102,
+      143,54,65,25,63,161,1,216,80,73,209,76,132,187,208,89,18,169,200,196,135,130,116,188,
+      159,86,164,100,109,198,173,186,3,64,52,217,226,250,124,123,5,202,38,147,118,126,255,82,
+      85,212,207,206,59,227,47,16,58,17,182,189,28,42,223,183,170,213,119,248,152,2,44,154,
+      163,70,221,153,101,155,167,43,172,9,129,22,39,253,19,98,108,110,79,113,224,232,178,185,
+      112,104,218,246,97,228,251,34,242,193,238,210,144,12,191,179,162,241,81,51,145,235,249,
+      14,239,107,49,192,214,31,181,199,106,157,184,84,204,176,115,121,50,45,127,4,150,254,138,
+      236,205,93,222,114,67,29,24,72,243,141,128,195,78,66,215,61,156,180],
+    p: [],
+    init: function() {
+      for (let i = 0; i < 256; i++) {
+        this.p[i] = this.permutation[i];
+      }
+      for (let i = 0; i < 256; i++) {
+        this.p[256 + i] = this.p[i];
+      }
+    },
+    fade: function(t) { return t * t * t * (t * (t * 6 - 15) + 10); },
+    lerp: function(t, a, b) { return a + t * (b - a); },
+    grad: function(hash, x, y, z) {
+      let h = hash & 15;
+      let u = h < 8 ? x : y;
+      let v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
+      return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+    },
+    noise: function(x, y, z) {
+      let X = Math.floor(x) & 255;
+      let Y = Math.floor(y) & 255;
+      let Z = Math.floor(z) & 255;
+      x -= Math.floor(x);
+      y -= Math.floor(y);
+      z -= Math.floor(z);
+      let u = this.fade(x);
+      let v = this.fade(y);
+      let w = this.fade(z);
+      let A = this.p[X] + Y;
+      let AA = this.p[A] + Z;
+      let AB = this.p[A + 1] + Z;
+      let B = this.p[X + 1] + Y;
+      let BA = this.p[B] + Z;
+      let BB = this.p[B + 1] + Z;
+      return this.lerp(w,
+          this.lerp(v,
+              this.lerp(u, this.grad(this.p[AA], x, y, z),
+                           this.grad(this.p[BA], x - 1, y, z)),
+              this.lerp(u, this.grad(this.p[AB], x, y - 1, z),
+                           this.grad(this.p[BB], x - 1, y - 1, z))
+          ),
+          this.lerp(v,
+              this.lerp(u, this.grad(this.p[AA + 1], x, y, z - 1),
+                           this.grad(this.p[BA + 1], x - 1, y, z - 1)),
+              this.lerp(u, this.grad(this.p[AB + 1], x, y - 1, z - 1),
+                           this.grad(this.p[BB + 1], x - 1, y - 1, z - 1))
+          )
+      );
+    }
+  };
+  PerlinNoise.init();
+  function perlin2(x, y) {
+    return PerlinNoise.noise(x, y, 0);
+  }
+  
+  /***** Simulation Parameters *****/
+  const NX = 200;       // grid width (cells)
+  const NY = 100;       // grid height (cells)
+  const cellSize = 4;   // pixels per cell
+  const stepsPerFrame = 5;  // LBM steps per animation frame
+  
+  // D2Q9 lattice directions and weights:
+  const ex = [0,  1,  0, -1,  0,  1, -1, -1,  1];
+  const ey = [0,  0,  1,  0, -1,  1,  1, -1, -1];
+  const weights = [4/9, 1/9, 1/9, 1/9, 1/9, 1/36, 1/36, 1/36, 1/36];
+  const cs2 = 1/3;
+  
+  // Global LBM arrays:
+  let f = new Float32Array(NX * NY * 9);
+  let fTemp = new Float32Array(NX * NY * 9);
+  
+  // Fluid simulation parameters:
+  let viscosity = parseFloat(document.getElementById('viscosity').value);
+  let tau = viscosity * 3 + 0.5;
+  let damping = parseFloat(document.getElementById('damping').value);
+  let noiseAmplitude = parseFloat(document.getElementById('noiseAmplitude').value);
+  let noiseScale = parseFloat(document.getElementById('noiseScale').value);
+  let tailLength = parseFloat(document.getElementById('tailLength').value);
+  let spawnRate = parseFloat(document.getElementById('spawnRate').value);
+  
+  // Thermal parameters:
+  let D_const = parseFloat(document.getElementById('D_const').value);
+  let k_const = parseFloat(document.getElementById('k_const').value);
+  let dpdt = parseFloat(document.getElementById('dpdt').value);
+  let vc = parseFloat(document.getElementById('vc').value);
+  let d_max = parseFloat(document.getElementById('d_max').value);
+  
+  let showDivergence = false;
+  let showTemperature = false;
+  let showLandMap = false;
+  
+  // Editor state:
+  // currentEditor: "none", "original", "seasonal", or "land"
+  let currentEditor = "none";
+  let painting = false;
+  let editorMousePos = { x: 0, y: 0 };
+  
+  // Ground temperature maps:
+  let baseMap = new Float32Array(NX * NY);
+  let editMap = new Float32Array(NX * NY);
+  let seasonalMap = new Float32Array(NX * NY);
+  const initialBaseAmplitude = 0.01;
+  function generateBaseMap(amplitude, scale) {
+    for (let y = 0; y < NY; y++) {
+      for (let x = 0; x < NX; x++) {
+        baseMap[x + y * NX] = perlin2(x * scale, y * scale) * amplitude;
+      }
+    }
+  }
+  generateBaseMap(initialBaseAmplitude, noiseScale);
+  for (let i = 0; i < NX * NY; i++) {
+    editMap[i] = 0;
+    seasonalMap[i] = 0;
+  }
+  
+  // New field: air temperature (one per cell)
+  let airTemp = new Float32Array(NX * NY);
+  for (let i = 0; i < NX * NY; i++) airTemp[i] = 0;
+  
+  /***** New Land Map & Cities *****/
+  let landMap = new Uint8Array(NX * NY);
+  for (let i = 0; i < NX * NY; i++) { landMap[i] = 0; } // 0 = water, 1 = land
+  let cities = []; // each element: {x, y} in cell coordinates
+  
+  /***** Hurricane Variables *****/
+  let hurricanes = []; // each: {id, x, y, radius}
+  let nextHurricaneId = 1;
+  let hurricaneSpawnAccumulator = 0;
+  let hurricaneRecords = []; // log of {id, size, x, y} updated every 1000 steps
+  
+  /***** Time (Years/Months) *****/
+  let currentMonth = 0;
+  let currentYear = 1955;
+  const timeDisplay = document.getElementById('timeDisplay');
+  function updateTimeDisplay() {
+    const monthNames = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    timeDisplay.textContent = currentYear + " - " + monthNames[currentMonth];
+  }
+  updateTimeDisplay();
+  
+  /***** Seasonal Multi-Handle Slider *****/
+  const seasonalSliderCanvas = document.getElementById('seasonalSliderCanvas');
+  const seasonalSliderCtx = seasonalSliderCanvas.getContext('2d');
+  // 12 seasonal effect values, range 0-1; default 0.0
+  let seasonalEffects = new Array(12).fill(0.0);
+  function drawSeasonalSlider() {
+    let w = seasonalSliderCanvas.width;
+    let h = seasonalSliderCanvas.height;
+    seasonalSliderCtx.clearRect(0, 0, w, h);
+    // Draw horizontal baseline
+    seasonalSliderCtx.strokeStyle = '#aaa';
+    seasonalSliderCtx.lineWidth = 2;
+    seasonalSliderCtx.beginPath();
+    seasonalSliderCtx.moveTo(0, h/2);
+    seasonalSliderCtx.lineTo(w, h/2);
+    seasonalSliderCtx.stroke();
+    // Draw 12 handles
+    let handleRadius = 5;
+    let gap = w / 11; // 12 evenly spaced points
+    for (let i = 0; i < 12; i++) {
+      let x = gap * i;
+      // Map seasonal effect: value=0 -> y = h, value=1 -> y = 0
+      let y = h - (seasonalEffects[i] * h);
+      seasonalSliderCtx.fillStyle = 'white';
+      seasonalSliderCtx.beginPath();
+      seasonalSliderCtx.arc(x, y, handleRadius, 0, 2 * Math.PI);
+      seasonalSliderCtx.fill();
+      seasonalSliderCtx.fillStyle = 'white';
+      seasonalSliderCtx.font = "10px sans-serif";
+      seasonalSliderCtx.fillText(["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][i], x - 10, h - 2);
+    }
+  }
+  drawSeasonalSlider();
+  let draggingHandle = -1;
+  seasonalSliderCanvas.addEventListener('mousedown', function(e) {
+    const rect = seasonalSliderCanvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    let w = seasonalSliderCanvas.width;
+    let gap = w / 11;
+    for (let i = 0; i < 12; i++) {
+      let x = gap * i;
+      let handleRadius = 5;
+      let hCanvas = seasonalSliderCanvas.height;
+      let y = hCanvas - (seasonalEffects[i] * hCanvas);
+      if (Math.sqrt((mouseX - x)**2 + (mouseY - y)**2) < handleRadius + 2) {
+        draggingHandle = i;
+        break;
+      }
+    }
+  });
+  seasonalSliderCanvas.addEventListener('mousemove', function(e) {
+    if (draggingHandle >= 0) {
+      const rect = seasonalSliderCanvas.getBoundingClientRect();
+      let mouseY = e.clientY - rect.top;
+      let hCanvas = seasonalSliderCanvas.height;
+      mouseY = Math.max(0, Math.min(hCanvas, mouseY));
+      seasonalEffects[draggingHandle] = (hCanvas - mouseY) / hCanvas;
+      drawSeasonalSlider();
+    }
+  });
+  seasonalSliderCanvas.addEventListener('mouseup', function() { draggingHandle = -1; });
+  seasonalSliderCanvas.addEventListener('mouseleave', function() { draggingHandle = -1; });
+  
+  /***** UI Elements *****/
+  const visSlider = document.getElementById('viscosity');
+  const viscLabel = document.getElementById('viscLabel');
+  const dampSlider = document.getElementById('damping');
+  const dampLabel = document.getElementById('dampLabel');
+  const noiseAmpSlider = document.getElementById('noiseAmplitude');
+  const noiseAmpLabel = document.getElementById('noiseAmpLabel');
+  const noiseScaleSlider = document.getElementById('noiseScale');
+  const noiseScaleLabel = document.getElementById('noiseScaleLabel');
+  const tailLengthSlider = document.getElementById('tailLength');
+  const tailLengthLabel = document.getElementById('tailLengthLabel');
+  const spawnRateSlider = document.getElementById('spawnRate');
+  const spawnRateLabel = document.getElementById('spawnRateLabel');
+  const D_constSlider = document.getElementById('D_const');
+  const D_constLabel = document.getElementById('D_constLabel');
+  const k_constSlider = document.getElementById('k_const');
+  const k_constLabel = document.getElementById('k_constLabel');
+  const dpdtSlider = document.getElementById('dpdt');
+  const dpdtLabel = document.getElementById('dpdtLabel');
+  const vcSlider = document.getElementById('vc');
+  const vcLabel = document.getElementById('vcLabel');
+  const d_maxSlider = document.getElementById('d_max');
+  const d_maxLabel = document.getElementById('d_maxLabel');
+  const toggleDivergenceBtn = document.getElementById('toggleDivergence');
+  const toggleTemperatureBtn = document.getElementById('toggleTemperature');
+  const toggleLandMapBtn = document.getElementById('toggleLandMap');
+  const enterOriginalEditorBtn = document.getElementById('enterOriginalEditor');
+  const enterSeasonalEditorBtn = document.getElementById('enterSeasonalEditor');
+  const enterLandEditorBtn = document.getElementById('enterLandEditor');
+  const editorControls = document.getElementById('editorControls');
+  const seasonalEditorControls = document.getElementById('seasonalEditorControls');
+  const landEditorControls = document.getElementById('landEditorControls');
+  // --- Original Editor controls:
+  const brushSizeSlider = document.getElementById('brushSize');
+  const brushSizeLabel = document.getElementById('brushSizeLabel');
+  const brushValueSlider = document.getElementById('brushValue');
+  const brushValueLabel = document.getElementById('brushValueLabel');
+  const brushWeightSlider = document.getElementById('brushWeight');
+  const brushWeightLabel = document.getElementById('brushWeightLabel');
+  const clearPerlinBtn = document.getElementById('clearPerlin');
+  const clearEditBtn = document.getElementById('clearEdit');
+  const saveMapBtn = document.getElementById('saveMap');
+  const loadMapBtn = document.getElementById('loadMap');
+  const returnOriginalBtn = document.getElementById('returnOriginal');
+  const loadMapInput = document.getElementById('loadMapInput');
+  // --- Seasonal Editor controls:
+  const s_brushSizeSlider = document.getElementById('s_brushSize');
+  const s_brushSizeLabel = document.getElementById('s_brushSizeLabel');
+  const s_brushValueSlider = document.getElementById('s_brushValue');
+  const s_brushValueLabel = document.getElementById('s_brushValueLabel');
+  const s_brushWeightSlider = document.getElementById('s_brushWeight');
+  const s_brushWeightLabel = document.getElementById('s_brushWeightLabel');
+  const clearSeasonalBtn = document.getElementById('clearSeasonal');
+  const saveSeasonalBtn = document.getElementById('saveSeasonal');
+  const loadSeasonalBtn = document.getElementById('loadSeasonal');
+  const returnSeasonalBtn = document.getElementById('returnSeasonal');
+  const loadSeasonalInput = document.getElementById('loadSeasonalInput');
+  // --- Land Editor controls:
+  const landEditorModeSelect = document.getElementById('landEditorMode');
+  const landBrushSizeSlider = document.getElementById('landBrushSize');
+  const landBrushSizeLabel = document.getElementById('landBrushSizeLabel');
+  const setToLandCheckbox = document.getElementById('setToLand');
+  const clearLandMapBtn = document.getElementById('clearLandMap');
+  const saveLandMapBtn = document.getElementById('saveLandMap');
+  const loadLandMapBtn = document.getElementById('loadLandMap');
+  const returnLandBtn = document.getElementById('returnLand');
+  const loadLandMapInput = document.getElementById('loadLandMapInput');
+  // --- Hurricane controls:
+  const hurricaneGrowthRateSlider = document.getElementById('hurricaneGrowthRate');
+  const hurricaneGrowthRateLabel = document.getElementById('hurricaneGrowthRateLabel');
+  const hurricaneDivergenceRateSlider = document.getElementById('hurricaneDivergenceRate');
+  const hurricaneDivergenceRateLabel = document.getElementById('hurricaneDivergenceRateLabel');
+  const hurricaneSpawnRateSlider = document.getElementById('hurricaneSpawnRate');
+  const hurricaneSpawnRateLabel = document.getElementById('hurricaneSpawnRateLabel');
+  // --- System Settings and Save Results:
+  const saveSystemSettingsBtn = document.getElementById('saveSystemSettings');
+  const loadSystemSettingsBtn = document.getElementById('loadSystemSettings');
+  const saveResultsBtn = document.getElementById('saveResultsBtn');
+  // --- Simulation controls:
+  const resetSimBtn = document.getElementById('resetSim');
+  const pauseSimBtn = document.getElementById('pauseSim');
+  const stepCounter = document.getElementById('stepCounter');
+  const stepFrameBtn = document.getElementById('stepFrame');
+  
+  /***** Event Listeners for Simulation Sliders *****/
+  visSlider.addEventListener('input', (e) => {
+    viscosity = parseFloat(e.target.value);
+    tau = viscosity * 3 + 0.5;
+    viscLabel.textContent = viscosity.toFixed(3);
+  });
+  dampSlider.addEventListener('input', (e) => {
+    damping = parseFloat(e.target.value);
+    dampLabel.textContent = damping.toFixed(3);
+  });
+  noiseAmpSlider.addEventListener('input', (e) => {
+    noiseAmplitude = parseFloat(e.target.value);
+    noiseAmpLabel.textContent = noiseAmplitude.toFixed(3);
+  });
+  noiseScaleSlider.addEventListener('input', (e) => {
+    noiseScale = parseFloat(e.target.value);
+    noiseScaleLabel.textContent = noiseScale.toFixed(3);
+  });
+  tailLengthSlider.addEventListener('input', (e) => {
+    tailLength = parseFloat(e.target.value);
+    tailLengthLabel.textContent = tailLength.toFixed(1);
+  });
+  spawnRateSlider.addEventListener('input', (e) => {
+    spawnRate = parseFloat(e.target.value);
+    spawnRateLabel.textContent = spawnRate;
+  });
+  D_constSlider.addEventListener('input', (e) => {
+    D_const = parseFloat(e.target.value);
+    D_constLabel.textContent = D_const.toFixed(3);
+  });
+  k_constSlider.addEventListener('input', (e) => {
+    k_const = parseFloat(e.target.value);
+    k_constLabel.textContent = k_const.toFixed(3);
+  });
+  dpdtSlider.addEventListener('input', (e) => {
+    dpdt = parseFloat(e.target.value);
+    dpdtLabel.textContent = dpdt.toFixed(2);
+  });
+  vcSlider.addEventListener('input', (e) => {
+    vc = parseFloat(e.target.value);
+    vcLabel.textContent = vc.toFixed(0);
+  });
+  d_maxSlider.addEventListener('input', (e) => {
+    d_max = parseFloat(e.target.value);
+    d_maxLabel.textContent = d_max.toFixed(3);
+  });
+  hurricaneGrowthRateSlider.addEventListener('input', (e) => {
+    hurricaneGrowthRateLabel.textContent = parseFloat(e.target.value).toFixed(3);
+  });
+  hurricaneDivergenceRateSlider.addEventListener('input', (e) => {
+    hurricaneDivergenceRateLabel.textContent = parseFloat(e.target.value).toFixed(3);
+  });
+  hurricaneSpawnRateSlider.addEventListener('input', (e) => {
+    hurricaneSpawnRateLabel.textContent = e.target.value;
+  });
+  
+  /***** Toggle Buttons *****/
+  toggleDivergenceBtn.addEventListener('click', () => {
+    showDivergence = !showDivergence;
+    if (showDivergence) {
+      showTemperature = false;
+      toggleTemperatureBtn.textContent = "Show Temperature";
+      toggleDivergenceBtn.textContent = "Hide Divergence";
+    } else {
+      toggleDivergenceBtn.textContent = "Show Divergence";
+    }
+  });
+  toggleTemperatureBtn.addEventListener('click', () => {
+    showTemperature = !showTemperature;
+    if (showTemperature) {
+      showDivergence = false;
+      toggleDivergenceBtn.textContent = "Show Divergence";
+      toggleTemperatureBtn.textContent = "Hide Temperature";
+    } else {
+      toggleTemperatureBtn.textContent = "Show Temperature";
+    }
+  });
+  toggleLandMapBtn.addEventListener('click', () => {
+    showLandMap = !showLandMap;
+    if (showLandMap) {
+      toggleLandMapBtn.textContent = "Hide Land Map";
+    } else {
+      toggleLandMapBtn.textContent = "Show Land Map";
+    }
+  });
+  
+  /***** Editor Toggle Buttons *****/
+  enterOriginalEditorBtn.addEventListener('click', () => {
+    currentEditor = "original";
+    editorControls.style.display = 'block';
+    enterOriginalEditorBtn.style.display = 'none';
+    enterSeasonalEditorBtn.style.display = 'none';
+    enterLandEditorBtn.style.display = 'none';
+  });
+  enterSeasonalEditorBtn.addEventListener('click', () => {
+    currentEditor = "seasonal";
+    seasonalEditorControls.style.display = 'block';
+    enterOriginalEditorBtn.style.display = 'none';
+    enterSeasonalEditorBtn.style.display = 'none';
+    enterLandEditorBtn.style.display = 'none';
+  });
+  enterLandEditorBtn.addEventListener('click', () => {
+    currentEditor = "land";
+    landEditorControls.style.display = 'block';
+    enterOriginalEditorBtn.style.display = 'none';
+    enterSeasonalEditorBtn.style.display = 'none';
+    enterLandEditorBtn.style.display = 'none';
+  });
+  // Return buttons:
+  returnOriginalBtn.addEventListener('click', () => {
+    currentEditor = "none";
+    editorControls.style.display = 'none';
+    enterOriginalEditorBtn.style.display = 'inline-block';
+    enterSeasonalEditorBtn.style.display = 'inline-block';
+    enterLandEditorBtn.style.display = 'inline-block';
+  });
+  returnSeasonalBtn.addEventListener('click', () => {
+    currentEditor = "none";
+    seasonalEditorControls.style.display = 'none';
+    enterOriginalEditorBtn.style.display = 'inline-block';
+    enterSeasonalEditorBtn.style.display = 'inline-block';
+    enterLandEditorBtn.style.display = 'inline-block';
+  });
+  returnLandBtn.addEventListener('click', () => {
+    currentEditor = "none";
+    landEditorControls.style.display = 'none';
+    enterOriginalEditorBtn.style.display = 'inline-block';
+    enterSeasonalEditorBtn.style.display = 'inline-block';
+    enterLandEditorBtn.style.display = 'inline-block';
+  });
+  
+  /***** Original Editor Brush Controls *****/
+  brushSizeSlider.addEventListener('input', (e) => {
+    brushSizeLabel.textContent = e.target.value;
+  });
+  brushValueSlider.addEventListener('input', (e) => {
+    brushValueLabel.textContent = parseFloat(e.target.value).toFixed(3);
+  });
+  brushWeightSlider.addEventListener('input', (e) => {
+    brushWeightLabel.textContent = parseFloat(e.target.value).toFixed(2);
+  });
+  clearPerlinBtn.addEventListener('click', () => {
+    generateBaseMap(0.01, noiseScale);
+  });
+  clearEditBtn.addEventListener('click', () => {
+    for (let i = 0; i < NX * NY; i++) {
+      baseMap[i] = 0;
+      editMap[i] = 0;
+    }
+  });
+  saveMapBtn.addEventListener('click', () => {
+    // Save original map to PNG
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = NX;
+    offCanvas.height = NY;
+    const offCtx = offCanvas.getContext('2d');
+    const imageData = offCtx.createImageData(NX, NY);
+    for (let y = 0; y < NY; y++) {
+      for (let x = 0; x < NX; x++) {
+        const idx = x + y * NX;
+        let T = baseMap[idx] + editMap[idx];
+        let col = Math.floor(((T + 0.02) / 0.04) * 255);
+        col = Math.max(0, Math.min(255, col));
+        const pixelIndex = (x + y * NX) * 4;
+        imageData.data[pixelIndex] = col;
+        imageData.data[pixelIndex+1] = col;
+        imageData.data[pixelIndex+2] = col;
+        imageData.data[pixelIndex+3] = 255;
+      }
+    }
+    offCtx.putImageData(imageData, 0, 0);
+    const link = document.createElement('a');
+    link.download = 'ground_temperature_map.png';
+    link.href = offCanvas.toDataURL('image/png');
+    link.click();
+    currentEditor = "none";
+    editorControls.style.display = 'none';
+    enterOriginalEditorBtn.style.display = 'inline-block';
+    enterSeasonalEditorBtn.style.display = 'inline-block';
+    enterLandEditorBtn.style.display = 'inline-block';
+  });
+  loadMapBtn.addEventListener('click', () => {
+    loadMapInput.click();
+  });
+  loadMapInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(event) {
+      const img = new Image();
+      img.onload = function() {
+        const offCanvas = document.createElement('canvas');
+        offCanvas.width = NX;
+        offCanvas.height = NY;
+        const offCtx = offCanvas.getContext('2d');
+        offCtx.drawImage(img, 0, 0, NX, NY);
+        const imageData = offCtx.getImageData(0, 0, NX, NY);
+        for (let y = 0; y < NY; y++) {
+          for (let x = 0; x < NX; x++) {
+            const pixelIndex = (x + y * NX) * 4;
+            const col = imageData.data[pixelIndex];
+            const T = (col / 255) * 0.04 - 0.02;
+            const idx = x + y * NX;
+            baseMap[idx] = T;
+            editMap[idx] = 0;
+          }
+        }
+      }
+      img.src = event.target.result;
+    }
+    reader.readAsDataURL(file);
+  });
+  
+  /***** Seasonal Editor Buttons *****/
+  clearSeasonalBtn.addEventListener('click', () => {
+    for (let i = 0; i < NX * NY; i++) {
+      seasonalMap[i] = 0;
+    }
+  });
+  function saveSeasonalMapToPNG() {
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = NX;
+    offCanvas.height = NY;
+    const offCtx = offCanvas.getContext('2d');
+    const imageData = offCtx.createImageData(NX, NY);
+    for (let y = 0; y < NY; y++) {
+      for (let x = 0; x < NX; x++) {
+        const idx = x + y * NX;
+        let T = seasonalMap[idx];
+        let col = Math.floor(((T + 0.02) / 0.04) * 255);
+        col = Math.max(0, Math.min(255, col));
+        const pixelIndex = (x + y * NX) * 4;
+        imageData.data[pixelIndex] = col;
+        imageData.data[pixelIndex+1] = col;
+        imageData.data[pixelIndex+2] = col;
+        imageData.data[pixelIndex+3] = 255;
+      }
+    }
+    offCtx.putImageData(imageData, 0, 0);
+    const link = document.createElement('a');
+    link.download = 'seasonal_temperature_map.png';
+    link.href = offCanvas.toDataURL('image/png');
+    link.click();
+  }
+  saveSeasonalBtn.addEventListener('click', () => {
+    saveSeasonalMapToPNG();
+    currentEditor = "none";
+    seasonalEditorControls.style.display = 'none';
+    enterOriginalEditorBtn.style.display = 'inline-block';
+    enterSeasonalEditorBtn.style.display = 'inline-block';
+    enterLandEditorBtn.style.display = 'inline-block';
+  });
+  loadSeasonalBtn.addEventListener('click', () => {
+    loadSeasonalInput.click();
+  });
+  loadSeasonalInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(event) {
+      const img = new Image();
+      img.onload = function() {
+        const offCanvas = document.createElement('canvas');
+        offCanvas.width = NX;
+        offCanvas.height = NY;
+        const offCtx = offCanvas.getContext('2d');
+        offCtx.drawImage(img, 0, 0, NX, NY);
+        const imageData = offCtx.getImageData(0, 0, NX, NY);
+        for (let y = 0; y < NY; y++) {
+          for (let x = 0; x < NX; x++) {
+            const pixelIndex = (x + y * NX) * 4;
+            const col = imageData.data[pixelIndex];
+            const T = (col / 255) * 0.04 - 0.02;
+            const idx = x + y * NX;
+            seasonalMap[idx] = T;
+          }
+        }
+      }
+      img.src = event.target.result;
+    }
+    reader.readAsDataURL(file);
+  });
+  
+  /***** Land Editor Functions *****/
+  landBrushSizeSlider.addEventListener('input', (e) => {
+    landBrushSizeLabel.textContent = e.target.value;
+  });
+  clearLandMapBtn.addEventListener('click', () => {
+    for (let i = 0; i < NX * NY; i++) {
+      landMap[i] = 0;
+    }
+    cities = [];
+  });
+  saveLandMapBtn.addEventListener('click', () => {
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = NX;
+    offCanvas.height = NY;
+    const offCtx = offCanvas.getContext('2d');
+    const imageData = offCtx.createImageData(NX, NY);
+    for (let y = 0; y < NY; y++) {
+      for (let x = 0; x < NX; x++) {
+        const idx = x + y * NX;
+        const col = landMap[idx] === 1 ? 255 : 0;
+        const pixelIndex = (x + y * NX) * 4;
+        imageData.data[pixelIndex] = col;
+        imageData.data[pixelIndex+1] = col;
+        imageData.data[pixelIndex+2] = col;
+        imageData.data[pixelIndex+3] = 255;
+      }
+    }
+    offCtx.putImageData(imageData, 0, 0);
+    const link = document.createElement('a');
+    link.download = 'land_map.png';
+    link.href = offCanvas.toDataURL('image/png');
+    link.click();
+  });
+  loadLandMapBtn.addEventListener('click', () => {
+    loadLandMapInput.click();
+  });
+  loadLandMapInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(event) {
+      const img = new Image();
+      img.onload = function() {
+        const offCanvas = document.createElement('canvas');
+        offCanvas.width = NX;
+        offCanvas.height = NY;
+        const offCtx = offCanvas.getContext('2d');
+        offCtx.drawImage(img, 0, 0, NX, NY);
+        const imageData = offCtx.getImageData(0, 0, NX, NY);
+        for (let y = 0; y < NY; y++) {
+          for (let x = 0; x < NX; x++) {
+            const pixelIndex = (x + y * NX) * 4;
+            const col = imageData.data[pixelIndex];
+            landMap[x + y * NX] = col > 127 ? 1 : 0;
+          }
+        }
+      }
+      img.src = event.target.result;
+    }
+    reader.readAsDataURL(file);
+  });
+  function paintAtLand(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const mx = clientX - rect.left;
+    const my = clientY - rect.top;
+    const gridX = Math.floor(mx / cellSize);
+    const gridY = Math.floor(my / cellSize);
+    const mode = landEditorModeSelect.value; // "edit", "place", "delete"
+    if (mode === "edit") {
+      const brushRad = parseInt(landBrushSizeSlider.value);
+      const setLand = setToLandCheckbox.checked ? 1 : 0;
+      for (let j = -brushRad; j <= brushRad; j++) {
+        for (let i = -brushRad; i <= brushRad; i++) {
+          const dist = Math.sqrt(i * i + j * j);
+          if (dist <= brushRad) {
+            const gx = gridX + i;
+            const gy = gridY + j;
+            if (gx >= 0 && gx < NX && gy >= 0 && gy < NY) {
+              landMap[gx + gy * NX] = setLand;
+            }
+          }
+        }
+      }
+    } else if (mode === "place") {
+      const cityX = gridX;
+      const cityY = gridY;
+      let exists = cities.some(c => Math.abs(c.x - cityX) < 1 && Math.abs(c.y - cityY) < 1);
+      if (!exists) {
+        cities.push({x: cityX, y: cityY});
+      }
+    } else if (mode === "delete") {
+      const cityX = gridX;
+      const cityY = gridY;
+      cities = cities.filter(c => Math.abs(c.x - cityX) >= 1 || Math.abs(c.y - cityY) >= 1);
+    }
+  }
+  
+  /***** Simulation Control Buttons *****/
+  let paused = true;
+  pauseSimBtn.textContent = "Resume";
+  resetSimBtn.addEventListener('click', () => {
+    for (let y = 0; y < NY; y++) {
+      for (let x = 0; x < NX; x++) {
+        const baseIndex = (x + y * NX) * 9;
+        for (let i = 0; i < 9; i++) {
+          f[baseIndex + i] = weights[i];
+        }
+      }
+    }
+    particles.length = 0;
+    particleSpawnAccumulator = 0;
+    simTime = 0;
+    simStepCount = 0;
+  });
+  pauseSimBtn.addEventListener('click', () => {
+    paused = !paused;
+    pauseSimBtn.textContent = paused ? "Resume" : "Pause";
+  });
+  stepFrameBtn.addEventListener('click', () => {
+    if (!paused) {
+      alert("Please pause the simulation before stepping frame by frame.");
+      return;
+    }
+    stepFrame();
+  });
+  
+  /***** Canvas Setup *****/
+  const canvas = document.getElementById('canvas');
+  canvas.width = NX * cellSize;
+  canvas.height = NY * cellSize;
+  const ctx = canvas.getContext('2d');
+  
+  /***** Particle System *****/
+  const particles = [];
+  const particleLifetime = 15;
+  let particleSpawnAccumulator = 0;
+  function spawnParticle() {
+    particles.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      age: 0,
+      trail: []
+    });
+  }
+  
+  /***** Initialize LBM Grid (ρ = 1, u = 0) *****/
+  for (let y = 0; y < NY; y++) {
+    for (let x = 0; x < NX; x++) {
+      const baseIndex = (x + y * NX) * 9;
+      for (let i = 0; i < 9; i++) {
+        f[baseIndex + i] = weights[i];
+      }
+    }
+  }
+  
+  /***** Main LBM & Thermal Step *****/
+  let lastS = new Float32Array(NX * NY);
+  function stepLBM(dtStep) {
+    const feqArray = new Float32Array(NX * NY * 9);
+    const cellVel = new Array(NX * NY);
+    const cellVavg = new Float32Array(NX * NY);
+    // (1) Compute macroscopic variables and equilibrium distributions.
+    for (let y = 0; y < NY; y++) {
+      for (let x = 0; x < NX; x++) {
+        const index = x + y * NX;
+        const baseIndex = index * 9;
+        let rho = 0, momX = 0, momY = 0;
+        for (let i = 0; i < 9; i++) {
+          const fi = f[baseIndex + i];
+          rho += fi;
+          momX += fi * ex[i];
+          momY += fi * ey[i];
+        }
+        const ux = momX / rho;
+        const uy = momY / rho;
+        cellVel[index] = { ux, uy };
+        cellVavg[index] = (Math.abs(ux) + Math.abs(uy)) / 2;
+        const uSq = ux * ux + uy * uy;
+        for (let i = 0; i < 9; i++) {
+          const e_dot_u = ex[i] * ux + ey[i] * uy;
+          feqArray[baseIndex + i] = weights[i] * rho * (1 + 3 * e_dot_u + 4.5 * e_dot_u * e_dot_u - 1.5 * uSq);
+        }
+      }
+    }
+    // (2) Compute t_inc_average from incoming neighbors.
+    const t_inc_average = new Float32Array(NX * NY);
+    for (let y = 0; y < NY; y++) {
+      for (let x = 0; x < NX; x++) {
+        const index = x + y * NX;
+        let sum = 0, weightSum = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = (x + dx + NX) % NX;
+            const ny = (y + dy + NY) % NY;
+            const nIndex = nx + ny * NX;
+            const rx = -dx, ry = -dy;
+            const nVel = cellVel[nIndex];
+            const dot = nVel.ux * rx + nVel.uy * ry;
+            if (dot > 0) {
+              weightSum += dot;
+              sum += dot * airTemp[nIndex];
+            }
+          }
+        }
+        t_inc_average[index] = weightSum > 0 ? (sum / weightSum) : airTemp[index];
+      }
+    }
+    // (3) Compute t_inc from affine combination.
+    const t_inc = new Float32Array(NX * NY);
+    for (let y = 0; y < NY; y++) {
+      for (let x = 0; x < NX; x++) {
+        const index = x + y * NX;
+        const t_prior = airTemp[index];
+        const alpha = Math.min(1, vc * cellVavg[index]);
+        t_inc[index] = alpha * t_inc_average[index] + (1 - alpha) * t_prior;
+      }
+    }
+    // (4) Compute t_avg_adj from adjacent neighbors.
+    const t_avg_adj = new Float32Array(NX * NY);
+    for (let y = 0; y < NY; y++) {
+      for (let x = 0; x < NX; x++) {
+        const index = x + y * NX;
+        let s = 0, cnt = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = (x + dx + NX) % NX;
+            const ny = (y + dy + NY) % NY;
+            const nIndex = nx + ny * NX;
+            s += t_inc[nIndex];
+            cnt++;
+          }
+        }
+        t_avg_adj[index] = s / cnt;
+      }
+    }
+    // (5) Thermal update: compute forcing S and t_final.
+    const S_array = new Float32Array(NX * NY);
+    const t_final_array = new Float32Array(NX * NY);
+    for (let y = 0; y < NY; y++) {
+      for (let x = 0; x < NX; x++) {
+        const index = x + y * NX;
+        // Use seasonal effect for current month instead of global seasonalBlend:
+        const t_ground = baseMap[index] + editMap[index] + seasonalEffects[currentMonth] * seasonalMap[index];
+        const inc = t_inc[index];
+        const avg_adj = t_avg_adj[index];
+        const t_diff = k_const * (t_ground - inc);
+        let S_val = t_diff * dpdt;
+        S_val = Math.max(-d_max, Math.min(d_max, S_val));
+        S_array[index] = S_val;
+        t_final_array[index] = inc + t_diff;
+      }
+    }
+    // (5b) Hurricane-induced divergence:
+    for (let h of hurricanes) {
+      let r = Math.ceil(h.radius);
+      for (let j = -r; j <= r; j++) {
+        for (let i = -r; i <= r; i++) {
+          let cx = (Math.floor(h.x) + i);
+          let cy = (Math.floor(h.y) + j);
+          if (cx >= 0 && cx < NX && cy >= 0 && cy < NY) {
+            let dx = (cx + 0.5) - h.x;
+            let dy = (cy + 0.5) - h.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist < h.radius) {
+              let effect = parseFloat(hurricaneDivergenceRateSlider.value) * (1 - dist / h.radius);
+              let idx = cx + cy * NX;
+              S_array[idx] -= effect;
+            }
+          }
+        }
+      }
+    }
+    lastS = S_array;
+    // (6) Collision step.
+    for (let y = 0; y < NY; y++) {
+      for (let x = 0; x < NX; x++) {
+        const index = x + y * NX;
+        const baseIndex = index * 9;
+        for (let i = 0; i < 9; i++) {
+          f[baseIndex + i] = f[baseIndex + i] - (f[baseIndex + i] - feqArray[baseIndex + i]) / tau + S_array[index] * weights[i];
+        }
+      }
+    }
+    // (7) Streaming step.
+    for (let y = 0; y < NY; y++) {
+      for (let x = 0; x < NX; x++) {
+        const index = x + y * NX;
+        const baseIndex = index * 9;
+        for (let i = 0; i < 9; i++) {
+          const nx = (x + ex[i] + NX) % NX;
+          const ny = (y + ey[i] + NY) % NY;
+          const nBaseIndex = (nx + ny * NX) * 9;
+          fTemp[nBaseIndex + i] = f[baseIndex + i];
+        }
+      }
+    }
+    let temp = f;
+    f = fTemp;
+    fTemp = temp;
+    // (8) Damping:
+    for (let y = 0; y < NY; y++) {
+      for (let x = 0; x < NX; x++) {
+        const index = x + y * NX;
+        const baseIndex = index * 9;
+        for (let i = 0; i < 9; i++) {
+          f[baseIndex + i] = weights[i] + (f[baseIndex + i] - weights[i]) * (1 - damping * dtStep);
+        }
+      }
+    }
+    // (9) Update air temperature.
+    for (let i = 0; i < NX * NY; i++) {
+      airTemp[i] = t_final_array[i];
+    }
+    simStepCount += stepsPerFrame;
+  }
+  
+  /***** Hurricane Update *****/
+  function updateHurricanes(dt) {
+    // Spawn new hurricanes based on spawn rate (in steps per spawn inverse)
+    hurricaneSpawnAccumulator += dt * stepsPerFrame;
+    let spawnThreshold = parseFloat(hurricaneSpawnRateSlider.value);
+    while (hurricaneSpawnAccumulator >= spawnThreshold) {
+      let randIndex = Math.floor(Math.random() * (NX * NY));
+      if (airTemp[randIndex] > 0 && landMap[randIndex] === 0) {
+        let x = randIndex % NX;
+        let y = Math.floor(randIndex / NX);
+        hurricanes.push({id: nextHurricaneId++, x: x + 0.5, y: y + 0.5, radius: 5});
+      }
+      hurricaneSpawnAccumulator -= spawnThreshold;
+    }
+    // Update existing hurricanes.
+    for (let i = hurricanes.length - 1; i >= 0; i--) {
+      let h = hurricanes[i];
+      let index = Math.floor(h.x) + Math.floor(h.y) * NX;
+      let isWater = (landMap[index] === 0);
+      if (isWater) {
+        h.radius += parseFloat(hurricaneGrowthRateSlider.value) * airTemp[index];
+      } else {
+        h.radius -= parseFloat(hurricaneGrowthRateSlider.value);
+      }
+      // Compute average velocity within hurricane radius.
+      let sumUx = 0, sumUy = 0, count = 0;
+      let r = Math.ceil(h.radius);
+      for (let j = -r; j <= r; j++) {
+        for (let i2 = -r; i2 <= r; i2++) {
+          let cx = Math.floor(h.x) + i2;
+          let cy = Math.floor(h.y) + j;
+          if (cx >= 0 && cx < NX && cy >= 0 && cy < NY) {
+            let dx = i2, dy = j;
+            if (Math.sqrt(dx*dx + dy*dy) <= h.radius) {
+              let idx = cx + cy * NX;
+              const baseIndex = idx * 9;
+              let rho = 0, ux = 0, uy = 0;
+              for (let k = 0; k < 9; k++) {
+                let f_val = f[baseIndex + k];
+                rho += f_val;
+                ux += f_val * ex[k];
+                uy += f_val * ey[k];
+              }
+              sumUx += ux / rho;
+              sumUy += uy / rho;
+              count++;
+            }
+          }
+        }
+      }
+      if (count > 0) {
+        let avgUx = sumUx / count;
+        let avgUy = sumUy / count;
+        h.x += avgUx * dt * 5;
+        h.y += avgUy * dt * 5;
+        if (h.x < 0) h.x += NX;
+        if (h.y < 0) h.y += NY;
+        if (h.x >= NX) h.x -= NX;
+        if (h.y >= NY) h.y -= NY;
+      }
+      if (h.radius < 2.5) {
+        hurricanes.splice(i, 1);
+      }
+    }
+    // Log hurricane data every 1000 steps.
+    if (simStepCount % 1000 < stepsPerFrame) {
+      for (let h of hurricanes) {
+        hurricaneRecords.push({id: h.id, size: h.radius, x: h.x, y: h.y});
+      }
+    }
+  }
+  
+  /***** Helper: Bilinear Velocity Interpolation *****/
+  function getVelocityAt(gx, gy) {
+    let i = Math.floor(gx);
+    let j = Math.floor(gy);
+    const di = gx - i, dj = gy - j;
+    i = Math.max(0, Math.min(i, NX - 2));
+    j = Math.max(0, Math.min(j, NY - 2));
+    function cellVelocity(i, j) {
+      const baseIndex = (i + j * NX) * 9;
+      let rho = 0, ux = 0, uy = 0;
+      for (let k = 0; k < 9; k++) {
+        const f_val = f[baseIndex + k];
+        rho += f_val;
+        ux += f_val * ex[k];
+        uy += f_val * ey[k];
+      }
+      return { ux: ux / rho, uy: uy / rho };
+    }
+    const v00 = cellVelocity(i, j);
+    const v10 = cellVelocity(i + 1, j);
+    const v01 = cellVelocity(i, j + 1);
+    const v11 = cellVelocity(i + 1, j + 1);
+    const ux = (1 - di) * (1 - dj) * v00.ux +
+               di * (1 - dj) * v10.ux +
+               (1 - di) * dj * v01.ux +
+               di * dj * v11.ux;
+    const uy = (1 - di) * (1 - dj) * v00.uy +
+               di * (1 - dj) * v10.uy +
+               (1 - di) * dj * v01.uy +
+               di * dj * v11.uy;
+    return { ux, uy };
+  }
+  
+  /***** Particle Update *****/
+  let simTime = 0;
+  function updateParticles(dt) {
+    simTime += dt;
+    const speedFactor = 200;
+    for (let i = particles.length - 1; i >= 0; i--) {
+      let p = particles[i];
+      p.trail.push({ x: p.x, y: p.y, t: simTime });
+      while (p.trail.length > 0 && (simTime - p.trail[0].t) > tailLength) {
+        p.trail.shift();
+      }
+      const gx = p.x / cellSize;
+      const gy = p.y / cellSize;
+      const vel = getVelocityAt(gx, gy);
+      p.x += vel.ux * speedFactor * dt;
+      p.y += vel.uy * speedFactor * dt;
+      if (p.x < 0) p.x += canvas.width;
+      if (p.y < 0) p.y += canvas.height;
+      if (p.x >= canvas.width) p.x -= canvas.width;
+      if (p.y >= canvas.height) p.y -= canvas.height;
+      p.age += dt;
+      if (p.age > particleLifetime) {
+        particles.splice(i, 1);
+      }
+    }
+    particleSpawnAccumulator += dt * spawnRate;
+    while (particleSpawnAccumulator >= 1) {
+      spawnParticle();
+      particleSpawnAccumulator -= 1;
+    }
+  }
+  
+  /***** Painting in Editor Modes *****/
+  function paintAtOriginal(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const mx = clientX - rect.left;
+    const my = clientY - rect.top;
+    const gridX = Math.floor(mx / cellSize);
+    const gridY = Math.floor(my / cellSize);
+    const brushRad = parseInt(brushSizeSlider.value);
+    const brushTarget = parseFloat(brushValueSlider.value);
+    const weight = parseFloat(brushWeightSlider.value);
+    for (let j = -brushRad; j <= brushRad; j++) {
+      for (let i = -brushRad; i <= brushRad; i++) {
+        const dist = Math.sqrt(i * i + j * j);
+        if (dist <= brushRad) {
+          let factor = (1 - (dist / brushRad)) * weight;
+          const gx = gridX + i;
+          const gy = gridY + j;
+          if (gx >= 0 && gx < NX && gy >= 0 && gy < NY) {
+            const idx = gx + gy * NX;
+            const currentTotal = baseMap[idx] + editMap[idx];
+            const newTotal = (1 - factor) * currentTotal + factor * brushTarget;
+            let newEdit = newTotal - baseMap[idx];
+            if (newEdit > 0.02) newEdit = 0.02;
+            if (newEdit < -0.02) newEdit = -0.02;
+            editMap[idx] = newEdit;
+          }
+        }
+      }
+    }
+  }
+  function paintAtSeasonal(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const mx = clientX - rect.left;
+    const my = clientY - rect.top;
+    const gridX = Math.floor(mx / cellSize);
+    const gridY = Math.floor(my / cellSize);
+    const brushRad = parseInt(s_brushSizeSlider.value);
+    const brushTarget = parseFloat(s_brushValueSlider.value);
+    const weight = parseFloat(s_brushWeightSlider.value);
+    for (let j = -brushRad; j <= brushRad; j++) {
+      for (let i = -brushRad; i <= brushRad; i++) {
+        const dist = Math.sqrt(i * i + j * j);
+        if (dist <= brushRad) {
+          let factor = (1 - (dist / brushRad)) * weight;
+          const gx = gridX + i;
+          const gy = gridY + j;
+          if (gx >= 0 && gx < NX && gy >= 0 && gy < NY) {
+            const idx = gx + gy * NX;
+            const current = seasonalMap[idx];
+            const newVal = (1 - factor) * current + factor * brushTarget;
+            seasonalMap[idx] = Math.max(-0.02, Math.min(0.02, newVal));
+          }
+        }
+      }
+    }
+  }
+  function paintAtLand(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const mx = clientX - rect.left;
+    const my = clientY - rect.top;
+    const gridX = Math.floor(mx / cellSize);
+    const gridY = Math.floor(my / cellSize);
+    const mode = landEditorModeSelect.value;
+    if (mode === "edit") {
+      const brushRad = parseInt(landBrushSizeSlider.value);
+      const setLand = setToLandCheckbox.checked ? 1 : 0;
+      for (let j = -brushRad; j <= brushRad; j++) {
+        for (let i = -brushRad; i <= brushRad; i++) {
+          const dist = Math.sqrt(i * i + j * j);
+          if (dist <= brushRad) {
+            const gx = gridX + i;
+            const gy = gridY + j;
+            if (gx >= 0 && gx < NX && gy >= 0 && gy < NY) {
+              landMap[gx + gy * NX] = setLand;
+            }
+          }
+        }
+      }
+    } else if (mode === "place") {
+      const cityX = gridX;
+      const cityY = gridY;
+      let exists = cities.some(c => Math.abs(c.x - cityX) < 1 && Math.abs(c.y - cityY) < 1);
+      if (!exists) {
+        cities.push({x: cityX, y: cityY});
+      }
+    } else if (mode === "delete") {
+      const cityX = gridX;
+      const cityY = gridY;
+      cities = cities.filter(c => Math.abs(c.x - cityX) >= 1 || Math.abs(c.y - cityY) >= 1);
+    }
+  }
+  
+  canvas.addEventListener('mousedown', (e) => {
+    if (currentEditor === "none") return;
+    painting = true;
+    if (currentEditor === "original") {
+      paintAtOriginal(e.clientX, e.clientY);
+    } else if (currentEditor === "seasonal") {
+      paintAtSeasonal(e.clientX, e.clientY);
+    } else if (currentEditor === "land") {
+      paintAtLand(e.clientX, e.clientY);
+    }
+    const rect = canvas.getBoundingClientRect();
+    editorMousePos.x = e.clientX - rect.left;
+    editorMousePos.y = e.clientY - rect.top;
+  });
+  canvas.addEventListener('mousemove', (e) => {
+    if (currentEditor === "none" || !painting) return;
+    if (currentEditor === "original") {
+      paintAtOriginal(e.clientX, e.clientY);
+    } else if (currentEditor === "seasonal") {
+      paintAtSeasonal(e.clientX, e.clientY);
+    } else if (currentEditor === "land") {
+      paintAtLand(e.clientX, e.clientY);
+    }
+    const rect = canvas.getBoundingClientRect();
+    editorMousePos.x = e.clientX - rect.left;
+    editorMousePos.y = e.clientY - rect.top;
+  });
+  canvas.addEventListener('mouseup', () => { if (currentEditor !== "none") painting = false; });
+  canvas.addEventListener('mouseleave', () => { if (currentEditor !== "none") painting = false; });
+  
+  /***** Drawing *****/
+  function drawSimulation() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (showLandMap) {
+      // Draw land map view
+      for (let y = 0; y < NY; y++) {
+        for (let x = 0; x < NX; x++) {
+          const idx = x + y * NX;
+          ctx.fillStyle = landMap[idx] === 1 ? 'green' : 'blue';
+          ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+        }
+      }
+      // Draw cities as yellow triangles
+      ctx.fillStyle = 'yellow';
+      for (let c of cities) {
+        const cx = (c.x + 0.5) * cellSize;
+        const cy = (c.y + 0.5) * cellSize;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - 4);
+        ctx.lineTo(cx - 4, cy + 4);
+        ctx.lineTo(cx + 4, cy + 4);
+        ctx.closePath();
+        ctx.fill();
+      }
+      return;
+    }
+    if (currentEditor === "original") {
+      for (let y = 0; y < NY; y++) {
+        for (let x = 0; x < NX; x++) {
+          const idx = x + y * NX;
+          let T = baseMap[idx] + editMap[idx];
+          let col = Math.floor(((T + 0.02) / 0.04) * 255);
+          col = Math.max(0, Math.min(255, col));
+          ctx.fillStyle = `rgb(${col},${col},${col})`;
+          ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+        }
+      }
+      if (painting) {
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 2;
+        const r = parseInt(brushSizeSlider.value) * cellSize;
+        ctx.beginPath();
+        ctx.arc(editorMousePos.x, editorMousePos.y, r, 0, 2 * Math.PI);
+        ctx.stroke();
+      }
+    } else if (currentEditor === "seasonal") {
+      for (let y = 0; y < NY; y++) {
+        for (let x = 0; x < NX; x++) {
+          const idx = x + y * NX;
+          let T = seasonalMap[idx];
+          let col = Math.floor(((T + 0.02) / 0.04) * 255);
+          col = Math.max(0, Math.min(255, col));
+          ctx.fillStyle = `rgb(${col},${col},${col})`;
+          ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+        }
+      }
+      if (painting) {
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 2;
+        const r = parseInt(s_brushSizeSlider.value) * cellSize;
+        ctx.beginPath();
+        ctx.arc(editorMousePos.x, editorMousePos.y, r, 0, 2 * Math.PI);
+        ctx.stroke();
+      }
+    } else {
+      // Simulation mode view
+      if (showTemperature) {
+        for (let y = 0; y < NY; y++) {
+          for (let x = 0; x < NX; x++) {
+            const idx = x + y * NX;
+            let T_air = airTemp[idx];
+            let col = Math.floor(((T_air + 0.02) / 0.04) * 255);
+            col = Math.max(0, Math.min(255, col));
+            ctx.fillStyle = `rgb(${col},${col},${col})`;
+            ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+          }
+        }
+      } else if (showDivergence) {
+        for (let y = 0; y < NY; y++) {
+          for (let x = 0; x < NX; x++) {
+            const idx = x + y * NX;
+            let S_val = lastS[idx];
+            let col = Math.floor(((S_val + 0.02) / 0.04) * 255);
+            col = Math.max(0, Math.min(255, col));
+            ctx.fillStyle = `rgb(${col},${col},${col})`;
+            ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+          }
+        }
+      } else {
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+      // Draw hurricane visuals (yellow unfilled circles)
+      ctx.strokeStyle = 'yellow';
+      ctx.lineWidth = 2;
+      for (let h of hurricanes) {
+        ctx.beginPath();
+        let centerX = h.x * cellSize;
+        let centerY = h.y * cellSize;
+        let radiusPixels = h.radius * cellSize;
+        ctx.arc(centerX, centerY, radiusPixels, 0, 2 * Math.PI);
+        ctx.stroke();
+      }
+      // Draw particle trails and particles.
+      for (let p of particles) {
+        if (p.trail.length > 1) {
+          for (let i = 0; i < p.trail.length - 1; i++) {
+            let p1 = p.trail[i];
+            let p2 = p.trail[i + 1];
+            if (Math.abs(p1.x - p2.x) > canvas.width / 2 || Math.abs(p1.y - p2.y) > canvas.height / 2)
+              continue;
+            let alpha1 = (p1.t - (simTime - tailLength)) / tailLength;
+            let alpha2 = (p2.t - (simTime - tailLength)) / tailLength;
+            let segAlpha = (alpha1 + alpha2) / 2;
+            ctx.strokeStyle = `rgba(0,255,255,${segAlpha.toFixed(2)})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
+          }
+        }
+        ctx.fillStyle = 'rgba(0,255,255,1)';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    }
+  }
+  
+  /***** Main Animation Loop *****/
+  let simStepCount = 0;
+  let lastTime = performance.now();
+  function loop() {
+    const now = performance.now();
+    const dt = (now - lastTime) / 1000;
+    lastTime = now;
+    // Advance time (month/year) every 10,000 steps.
+    if (simStepCount % 10000 < stepsPerFrame && !paused) {
+      currentMonth++;
+      if (currentMonth >= 12) { currentMonth = 0; currentYear++; }
+      updateTimeDisplay();
+    }
+    if (currentEditor === "none" && !paused) {
+      const dtStep = dt / stepsPerFrame;
+      for (let i = 0; i < stepsPerFrame; i++) {
+        stepLBM(dtStep);
+      }
+      updateHurricanes(dt);
+      updateParticles(dt);
+    }
+    stepCounter.textContent = "Steps: " + simStepCount;
+    drawSimulation();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+  
+  /***** Step Frame Function *****/
+  function stepFrame() {
+    const dt = 1/60;
+    const dtStep = dt / stepsPerFrame;
+    for (let i = 0; i < stepsPerFrame; i++) {
+      stepLBM(dtStep);
+    }
+    updateParticles(dt);
+  }
+  
+  /***** Save/Load System Settings *****/
+  saveSystemSettingsBtn.addEventListener('click', function() {
+    const settings = {
+      sliders: {
+        viscosity: viscosity,
+        damping: damping,
+        noiseAmplitude: noiseAmplitude,
+        noiseScale: noiseScale,
+        tailLength: tailLength,
+        spawnRate: spawnRate,
+        D_const: D_const,
+        k_const: k_const,
+        dpdt: dpdt,
+        vc: vc,
+        d_max: d_max,
+        hurricaneGrowthRate: parseFloat(hurricaneGrowthRateSlider.value),
+        hurricaneDivergenceRate: parseFloat(hurricaneDivergenceRateSlider.value),
+        hurricaneSpawnRate: parseFloat(hurricaneSpawnRateSlider.value)
+      },
+      groundMaps: {
+        baseMap: Array.from(baseMap),
+        editMap: Array.from(editMap),
+        seasonalMap: Array.from(seasonalMap)
+      },
+      seasonalEffects: seasonalEffects,
+      landMap: Array.from(landMap),
+      cities: cities
+    };
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(settings));
+    const link = document.createElement("a");
+    link.setAttribute("href", dataStr);
+    link.setAttribute("download", "system_settings.json");
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  });
+  
+  loadSystemSettingsBtn.addEventListener('click', function() {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "application/json";
+    input.onchange = e => {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = function(event) {
+        const settings = JSON.parse(event.target.result);
+        viscosity = settings.sliders.viscosity;
+        damping = settings.sliders.damping;
+        noiseAmplitude = settings.sliders.noiseAmplitude;
+        noiseScale = settings.sliders.noiseScale;
+        tailLength = settings.sliders.tailLength;
+        spawnRate = settings.sliders.spawnRate;
+        D_const = settings.sliders.D_const;
+        k_const = settings.sliders.k_const;
+        dpdt = settings.sliders.dpdt;
+        vc = settings.sliders.vc;
+        d_max = settings.sliders.d_max;
+        hurricaneGrowthRateSlider.value = settings.sliders.hurricaneGrowthRate;
+        hurricaneDivergenceRateSlider.value = settings.sliders.hurricaneDivergenceRate;
+        hurricaneSpawnRateSlider.value = settings.sliders.hurricaneSpawnRate;
+        viscLabel.textContent = viscosity.toFixed(3);
+        dampLabel.textContent = damping.toFixed(3);
+        noiseAmpLabel.textContent = noiseAmplitude.toFixed(3);
+        noiseScaleLabel.textContent = noiseScale.toFixed(3);
+        tailLengthLabel.textContent = tailLength.toFixed(1);
+        spawnRateLabel.textContent = spawnRate;
+        D_constLabel.textContent = D_const.toFixed(3);
+        k_constLabel.textContent = k_const.toFixed(3);
+        dpdtLabel.textContent = dpdt.toFixed(2);
+        vcLabel.textContent = vc.toFixed(0);
+        d_maxLabel.textContent = d_max.toFixed(3);
+        hurricaneGrowthRateLabel.textContent = parseFloat(settings.sliders.hurricaneGrowthRate).toFixed(3);
+        hurricaneDivergenceRateLabel.textContent = parseFloat(settings.sliders.hurricaneDivergenceRate).toFixed(3);
+        hurricaneSpawnRateLabel.textContent = settings.sliders.hurricaneSpawnRate;
+        baseMap = new Float32Array(settings.groundMaps.baseMap);
+        editMap = new Float32Array(settings.groundMaps.editMap);
+        seasonalMap = new Float32Array(settings.groundMaps.seasonalMap);
+        seasonalEffects = settings.seasonalEffects;
+        drawSeasonalSlider();
+        landMap = new Uint8Array(settings.landMap);
+        cities = settings.cities;
+      }
+      reader.readAsText(file);
+    }
+    input.click();
+  });
+  
+  /***** Save Results (Cities and Hurricanes) *****/
+  saveResultsBtn.addEventListener('click', function() {
+    let cityCsv = "x,y\n";
+    for (let c of cities) {
+      cityCsv += c.x + "," + c.y + "\n";
+    }
+    const cityBlob = new Blob([cityCsv], {type: "text/csv"});
+    const cityUrl = URL.createObjectURL(cityBlob);
+    const cityLink = document.createElement("a");
+    cityLink.setAttribute("href", cityUrl);
+    cityLink.setAttribute("download", "cities.csv");
+    document.body.appendChild(cityLink);
+    cityLink.click();
+    cityLink.remove();
+    
+    let hurricaneCsv = "id,size,x,y\n";
+    for (let rec of hurricaneRecords) {
+      hurricaneCsv += rec.id + "," + rec.size + "," + rec.x + "," + rec.y + "\n";
+    }
+    const hurricaneBlob = new Blob([hurricaneCsv], {type: "text/csv"});
+    const hurricaneUrl = URL.createObjectURL(hurricaneBlob);
+    const hurricaneLink = document.createElement("a");
+    hurricaneLink.setAttribute("href", hurricaneUrl);
+    hurricaneLink.setAttribute("download", "hurricanes.csv");
+    document.body.appendChild(hurricaneLink);
+    hurricaneLink.click();
+    hurricaneLink.remove();
+  });
+  
+</script>
+</body>
+</html>
