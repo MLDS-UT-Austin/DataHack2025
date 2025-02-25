@@ -46,7 +46,7 @@ d_max = 0.005
 hurricane_divergence_rate = 0.01
 hurricane_growth_rate = 100
 
-GLOBAL_WIND = 0.0
+GLOBAL_WIND = -0.1
 
 # ---------------------------
 # Data Arrays and Initialization
@@ -94,14 +94,27 @@ hurricane_records = []  # log of hurricanes (updated periodically)
 # Time and seasonal effects
 current_month = 0
 current_year = 1955
+
+
+# seasonal_effects = np.zeros(12, dtype=np.float32)
+# Seasonal effects using a sine wave for smoother transition
+def seasonal_sine_wave(month):
+    """Generate seasonal effect using a sine wave (peaks in summer)"""
+    # Shifted and scaled sine wave: peaks at month ~7 (July)
+    return 0.5 * (1 + np.sin((month / 12.0 * 2 * np.pi) - np.pi / 2))
+
+
+# Initial seasonal effect values
 seasonal_effects = np.array(
-    [0.0, 0.1, 0.4, 0.5, 0.6, 0.8, 1.0, 1.1, 0.7, 0.4, 0.2, 0.0], dtype=np.float32
-)  # default all 0
+    [seasonal_sine_wave(m) for m in range(12)], dtype=np.float32
+)
 
 # Particle system (for flow visualization)
 particles = []
-particle_lifetime = 20.0
+particle_lifetime = 40.0
 particle_spawn_acc = 0.0
+
+TRAIL_LENGTH = 5
 
 # ---------------------------
 # Perlin Noise (for base map generation)
@@ -243,7 +256,7 @@ def get_velocity_at(gx, gy):
 sim_step_count = 0
 
 @numba.jit
-def step_lbm(dt_step, f, f_temp, air_temp, sim_step_count, hurricane_ids, hurricane_x, hurricane_y, hurricane_radius, current_month:int):
+def step_lbm(dt_step, f, f_temp, air_temp, sim_step_count, hurricane_ids, hurricane_x, hurricane_y, hurricane_radius, base_map, edit_map, seasonal_map, current_month:int):
     # (1) Compute macroscopic variables and equilibrium distribution
     feq = np.empty_like(f)
     cell_vel = [[(0, 0) for _ in range(NX)] for _ in range(NY)]
@@ -307,7 +320,8 @@ def step_lbm(dt_step, f, f_temp, air_temp, sim_step_count, hurricane_ids, hurric
     for j in range(NY):
         for i in range(NX):
             # Ground temperature uses base_map, edit_map and seasonal effect
-            t_ground = base_map[j, i] + edit_map[j, i] + seasonal_effects[current_month] * seasonal_map[j, i]
+            seasonal_scale = -0.5*math.cos(current_month / 12 * math.pi * 2) + 0.5  # 0 at month 0, 1 at month 6, 0 at month 12
+            t_ground = base_map[j, i] + edit_map[j, i] + seasonal_scale * seasonal_map[j, i]
             inc = t_inc[j, i]
             t_diff = k_const * (t_ground - inc)
             S_val = t_diff * dpdt
@@ -359,7 +373,24 @@ def step_lbm(dt_step, f, f_temp, air_temp, sim_step_count, hurricane_ids, hurric
     # (9) Update air temperature field
     air_temp[:,:] = t_final_array
     sim_step_count += steps_per_frame
-    return f, f_temp, air_temp, sim_step_count, hurricane_ids, hurricane_x, hurricane_y, hurricane_radius
+    
+    # shift everything by the global wind
+    previous_mod = int((sim_step_count-steps_per_frame)*dt_step*GLOBAL_WIND % NX)
+    current_mod = int(sim_step_count*dt_step*GLOBAL_WIND % NX)
+    def shift_array(arr, shift):
+        return np.concatenate((arr[:, -shift:], arr[:, :-shift]), axis=1)
+
+    # print(sim_step_count, dt_step, GLOBAL_WIND, NX)
+    if previous_mod > current_mod:
+        shift = np.int64(current_mod - previous_mod)
+        f = shift_array(f, shift)
+        f_temp = shift_array(f_temp, shift)
+        air_temp = shift_array(air_temp, shift)
+        base_map = shift_array(base_map, shift)
+        edit_map = shift_array(edit_map, shift)
+        seasonal_map = shift_array(seasonal_map, shift)
+
+    return f, f_temp, air_temp, sim_step_count, hurricane_ids, hurricane_x, hurricane_y, hurricane_radius, base_map, edit_map, seasonal_map
 
 def update_hurricanes(dt):
     global hurricane_spawn_acc, next_hurricane_id, hurricane_records, hurricane_ids, hurricane_x, hurricane_y, hurricane_radius
@@ -440,7 +471,7 @@ def update_particles(dt):
         gx = p["x"] / cell_size
         gy = p["y"] / cell_size
         vx, vy = get_velocity_at(gx, gy)
-        p["x"] += vx * speed_factor * dt
+        p["x"] += vx * speed_factor * dt + GLOBAL_WIND * dt
         p["y"] += vy * speed_factor * dt
         # Periodic boundaries
         if p["x"] < 0: p["x"] += NX * cell_size
@@ -482,10 +513,10 @@ while running:
 
     if not paused:
         for _ in range(steps_per_frame):
-            f, f_temp, air_temp, sim_step_count, hurricane_ids, hurricane_x, hurricane_y, hurricane_radius = step_lbm(dt, f, f_temp, air_temp, sim_step_count, hurricane_ids, hurricane_x, hurricane_y, hurricane_radius, int(current_month % 12))
+            f, f_temp, air_temp, sim_step_count, hurricane_ids, hurricane_x, hurricane_y, hurricane_radius, base_map, edit_map, seasonal_map = step_lbm(dt, f, f_temp, air_temp, sim_step_count, hurricane_ids, hurricane_x, hurricane_y, hurricane_radius, base_map, edit_map, seasonal_map, int(current_month % 12))
         update_hurricanes(dt)
         update_particles(dt)
-    current_month += dt *0.2
+    current_month += dt * 0.2
     
     # Draw land map (blue for water, green for land)
     for j in range(NY):
@@ -516,13 +547,13 @@ while running:
     # Draw particle trails (green lines)
     for p in particles:
         if len(p["trail"]) > 1:
-            for start in range(len(p["trail"]) - 1):
+            for start in range(max(0, len(p["trail"]) - TRAIL_LENGTH), len(p["trail"]) - 1):
                 x0, y0, _ = p["trail"][start]
                 x1, y1, _ = p["trail"][start + 1]
                 if abs(x0 - x1) < NX * cell_size / 2 and abs(y0 - y1) < NY * cell_size / 2:
                     pygame.draw.line(screen, (190, 190, 190),
-                                    (int(x0), int(y0)),
-                                    (int(x1), int(y1)), 1)
+                            (int(x0), int(y0)),
+                            (int(x1), int(y1)), 1)
                     
     # Draw cities
     for city in cities:
