@@ -1,6 +1,6 @@
 import sys
 
-import noise
+import util
 import numpy as np
 import pygame
 from pygame.locals import *
@@ -40,7 +40,7 @@ edit_map = np.zeros((NY, NX), dtype=np.float32)
 for y in range(NY):
     for x in range(NX):
         base_map[y, x] = (
-            noise.pnoise2(x * NOISE_SCALE, y * NOISE_SCALE, octaves=1) * NOISE_AMPLITUDE
+            util.pnoise2(x * NOISE_SCALE, y * NOISE_SCALE, octaves=1) * NOISE_AMPLITUDE
         )
 
 # Particle system

@@ -2,7 +2,7 @@ import math
 import random
 import sys
 
-import noise
+import util
 import numpy as np
 import pygame
 from pygame.locals import *
@@ -708,13 +708,13 @@ while True:
     # Compute wind forcing arrays for the entire grid once per frame
     ix, iy = np.meshgrid(np.arange(NX), np.arange(NY))
     vec_noise = np.vectorize(
-        lambda i, j: noise.pnoise3(
+        lambda i, j: util.pnoise3(
             i * WIND_SCALE, j * WIND_SCALE, sim_time * WIND_TIME_SCALE
         )
     )
     wind_noise_x = vec_noise(ix, iy)
     vec_noise_y = np.vectorize(
-        lambda i, j: noise.pnoise3(
+        lambda i, j: util.pnoise3(
             i * WIND_SCALE + 100, j * WIND_SCALE + 100, sim_time * WIND_TIME_SCALE
         )
     )
