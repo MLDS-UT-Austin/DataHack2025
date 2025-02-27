@@ -18,6 +18,22 @@ CITIES = [
     dict(name="Offshore B", x=660, y=184),
 ]
 
+MONTHS = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+]
+base_year = 1955
+
 
 class Visualizer:
     def __init__(self, sim):
@@ -47,8 +63,6 @@ class Visualizer:
     def draw(self):
 
         # Draw land map (blue for water, green for land)
-        if self.current_month % 12 == 0:
-            self.current_year = self.current_year + 1
         seasonal_scale = (
             -0.5 * math.cos(self.current_month / 12 * math.pi * 2) + 0.5
         )  # 0 at month 0, 1 at month 6, 0 at month 12
@@ -62,10 +76,12 @@ class Visualizer:
                 scale = (T + 0.02) / 0.04
                 scale = max(0, min(1, scale))
 
-                if self.land_map[j, i] == 0:
-                    color = (0, 0, 255 * scale)  # Blue for water
-                else:
-                    color = (0, 255 * scale, 0)  # Blue for water
+                # if self.land_map[j, i] == 0:
+                #     color = (0, 0, 255 * scale)  # Blue for water
+                # else:
+                #     color = (0, 255 * scale, 0)  # Blue for water
+
+                color = (255 * scale, 255 * scale, 255 * scale)  # Blue for water
 
                 pygame.draw.rect(
                     self.screen,
@@ -103,30 +119,30 @@ class Visualizer:
                 1,
             )
 
-        # # Draw particle trails (green lines)
-        # for p in self.particles:
-        #     if len(p[3]) > 1:
-        #         for start in range(
-        #             max(0, len(p[3]) - self.trail_length), len(p[3]) - 1
-        #         ):
-        #             x0, y0 = p[3][start]
-        #             x1, y1 = p[3][start + 1]
-        #             if (
-        #                 abs(x0 - x1) < NX * cell_size / 2
-        #                 and abs(y0 - y1) < NY * cell_size / 2
-        #             ):
-        #                 pygame.draw.line(
-        #                     self.screen,
-        #                     (190, 190, 190),
-        #                     (int(x0), int(y0)),
-        #                     (int(x1), int(y1)),
-        #                     1,
-        #                 )
+        # Draw particle trails (white lines)
+        for p in self.particles:
+            if len(p[3]) > 1:
+                for start in range(
+                    max(0, len(p[3]) - self.trail_length), len(p[3]) - 1
+                ):
+                    x0, y0 = p[3][start]
+                    x1, y1 = p[3][start + 1]
+                    if (
+                        abs(x0 - x1) < NX * cell_size / 2
+                        and abs(y0 - y1) < NY * cell_size / 2
+                    ):
+                        pygame.draw.line(
+                            self.screen,
+                            (190, 190, 190),
+                            (int(x0), int(y0)),
+                            (int(x1), int(y1)),
+                            1,
+                        )
 
         # Draw particles (white dots)
-        for p in self.particles:
-            x, y = p[0], p[1]
-            pygame.draw.circle(self.screen, (255, 255, 255), (int(x), int(y)), 2)
+        # for p in self.particles:
+        #     x, y = p[0], p[1]
+        #     pygame.draw.circle(self.screen, (255, 255, 255), (int(x), int(y)), 2)
 
         # Draw cities
         for city in CITIES:
@@ -136,6 +152,13 @@ class Visualizer:
             font = pygame.font.Font(None, 24)
             text = font.render(city["name"], True, (255, 255, 255))
             self.screen.blit(text, (x + 10, y - 10))
+
+        yearMonthStr = (
+            f"{MONTHS[int(self.current_month)]}, {base_year + self.current_year}"
+        )
+        font = pygame.font.Font(None, 24)
+        text = font.render(yearMonthStr, True, (255, 255, 255))
+        self.screen.blit(text, (0, 0))
 
         pygame.display.flip()
 
@@ -181,3 +204,49 @@ sim.run()
 
 # sim = Visualizer(LBMEngine(land_map))
 # sim.run()
+
+# class DualLogger:
+#     def __init__(self, data_log_file="logs/data.log", output_log_file="data/output.log"):
+#         self.data_logger = self._setup_logger("data_logger", data_log_file, "%(asctime)s - %(levelname)s - %(message)s")
+#         self.output_logger = self._setup_logger("output_logger", output_log_file, "%(message)s")
+#     def _setup_logger(self, name, log_file, format):
+#         logger = logging.getLogger(name)
+#         logger.setLevel(logging.INFO)
+#         # Create file handler
+#         file_handler = logging.FileHandler(log_file)
+#         file_handler.setLevel(logging.INFO)
+#         # Create formatter and add it to the handlers
+# formatter = logging.Formatter()
+#         file_handler.setFormatter(formatter)
+
+#         # Add the handlers to the logger
+#         logger.addHandler(file_handler)
+
+#         return logger
+
+#     def log_data(self, message):
+#         """
+#         Logs a data message.
+
+#         Args:
+#             message (str): The message to log.
+#         """
+#         self.data_logger.info(message)
+
+#     def log_output(self, message):
+#         """
+#         Logs an output message.
+
+#         Args:
+#             message (str): The message to log.
+#         """
+#         self.output_logger.info(message)
+
+#     def close_handlers(self):
+#         """Closes all handlers from both loggers"""
+#         for handler in self.data_logger.handlers[:]:
+#             handler.close()
+#             self.data_logger.removeHandler(handler)
+#         for handler in self.output_logger.handlers[:]:
+#             handler.close()
+#             self.output_logger.removeHandler(handler)

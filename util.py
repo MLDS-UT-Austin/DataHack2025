@@ -1,111 +1,127 @@
+import math
+import random
 from typing import Tuple
 
 import numpy as np
 from numba import njit
+import random
+
+# fmt: off
+PERM = [151,160,137,91,90,15,
+        131,13,201,95,96,53,194,233,7,225,140,36,103,30,
+        69,142,8,99,37,240,21,10,23,190,6,148,247,120,234,
+        75,0,26,197,62,94,252,219,203,117,35,11,32,57,177,
+        33,88,237,149,56,87,174,20,125,136,171,168,68,175,
+        74,165,71,134,139,48,27,166,77,146,158,231,83,111,
+        229,122,60,211,133,230,220,105,92,41,55,46,245,40,
+        244,102,143,54,65,25,63,161,1,216,80,73,209,76,132,
+        187,208,89,18,169,200,196,135,130,116,188,159,86,
+        164,100,109,198,173,186,3,64,52,217,226,250,124,123,
+        5,202,38,147,118,126,255,82,85,212,207,206,59,227,
+        47,16,58,17,182,189,28,42,223,183,170,213,119,248,
+        152,2,44,154,163,70,221,153,101,155,167,43,172,9,
+        129,22,39,253,19,98,108,110,79,113,224,232,178,185,
+        112,104,218,246,97,228,251,34,242,193,238,210,144,
+        12,191,179,162,241,81,51,145,235,249,14,239,107,49,
+        192,214,31,181,199,106,157,184,84,204,176,115,121,50,
+        45,127,4,150,254,138,236,205,93,222,114,67,29,24,72,
+        243,141,128,195,78,66,215,61,156,180] * 2
+PERM = np.array(PERM, dtype=np.int32)
+# fmt: on
 
 
 @njit
 def _fade(t):
-    """Fade function for Perlin noise."""
     return t * t * t * (t * (t * 6 - 15) + 10)
 
 
 @njit
 def _lerp(t, a, b):
-    """Linear interpolation for Perlin noise."""
     return a + t * (b - a)
 
 
 @njit
-def _grad(hash_val, x, y):
-    """Gradient function for 2D Perlin noise."""
-    h = hash_val & 15
-    grad_x = 1 + (h & 7)  # Gradient x: 1, 2, ..., 8
-    grad_x = -grad_x if (h & 8) != 0 else grad_x
-    grad_y = 1 + ((h >> 4) & 7)  # Gradient y: 1, 2, ..., 8
-    grad_y = -grad_y if ((h >> 4) & 8) != 0 else grad_y
-    return grad_x * x + grad_y * y
+def _grad(hash, x, y, z):
+    h = hash & 15
+    u = x if h < 8 else y
+    v = y if h < 4 else (x if (h == 12 or h == 14) else z)
+    return (u if (h & 1) == 0 else -u) + (v if (h & 2) == 0 else -v)
 
 
 @njit
-def _perlin2d(x, y, p):
-    """Compute 2D Perlin noise value at point (x,y)."""
-    # Calculate integer coordinates
-    xi, yi = int(x) & 255, int(y) & 255
+def _noise(x, y, z):
+    X = int(math.floor(x)) & 255
+    Y = int(math.floor(y)) & 255
+    Z = int(math.floor(z)) & 255
+    x -= math.floor(x)
+    y -= math.floor(y)
+    z -= math.floor(z)
+    u = _fade(x)
+    v = _fade(y)
+    w = _fade(z)
+    A = PERM[X] + Y
+    AA = PERM[A] + Z
+    AB = PERM[A + 1] + Z
+    B = PERM[X + 1] + Y
+    BA = PERM[B] + Z
+    BB = PERM[B + 1] + Z
+    return _lerp(
+        w,
+        _lerp(
+            v,
+            _lerp(u, _grad(PERM[AA], x, y, z), _grad(PERM[BA], x - 1, y, z)),
+            _lerp(u, _grad(PERM[AB], x, y - 1, z), _grad(PERM[BB], x - 1, y - 1, z)),
+        ),
+        _lerp(
+            v,
+            _lerp(
+                u,
+                _grad(PERM[AA + 1], x, y, z - 1),
+                _grad(PERM[BA + 1], x - 1, y, z - 1),
+            ),
+            _lerp(
+                u,
+                _grad(PERM[AB + 1], x, y - 1, z - 1),
+                _grad(PERM[BB + 1], x - 1, y - 1, z - 1),
+            ),
+        ),
+    )
 
-    # Calculate fractional parts
-    xf, yf = x - int(x), y - int(y)
-
-    # Compute fade curves
-    u, v = _fade(xf), _fade(yf)
-
-    # Hash coordinates of the 4 corners
-    aa = p[(p[xi] + yi) & 255]
-    ab = p[(p[xi] + yi + 1) & 255]
-    ba = p[(p[xi + 1] + yi) & 255]
-    bb = p[(p[xi + 1] + yi + 1) & 255]
-
-    # Interpolate between gradients
-    x1 = _lerp(u, _grad(aa, xf, yf), _grad(ba, xf - 1, yf))
-    x2 = _lerp(u, _grad(ab, xf, yf - 1), _grad(bb, xf - 1, yf - 1))
-    return _lerp(v, x1, x2)
 
 
 @njit
-def _generate_permutation(seed):
-    """Generate permutation table with given seed."""
-    np.random.seed(seed)
-    p = np.arange(256, dtype=np.int32)
-    np.random.shuffle(p)
-    return np.concatenate((p, p))
+def generate_perlin_noise(amplitude:float, scale:float, size: Tuple[int, int]) -> np.ndarray:
+    # def generate_perlin_noise(seed: int, size: Tuple[int, int], octave: int, start_frequency: float) -> np.ndarray:
+    x_offset = random.random() * 1000000
+    y_offset = random.random() * 1000000
+    output = np.zeros(size, dtype=np.float32)
+    for j in range(size[0]):
+        for i in range(size[1]):
+            output[j, i] = (
+                _noise(i * scale + x_offset, j * scale + y_offset, 0) * amplitude
+            )
+    return output.astype(np.float64)
 
 
 @njit
-def generate_perlin_noise(seed: int, size: Tuple[int, int], octave: int, start_frequency: float) -> np.ndarray:
+def rescale(x, new_min, new_max):
     """
-    Generate a 2D Perlin noise array with Numba support.
+    Rescale an array to a new range.
 
     Parameters:
-        seed (int): Seed for noise generation.
-        size (Tuple[int, int]): Dimensions of the output noise array.
-        octave (int): Number of octaves to add detail to the noise.
+        x (np.ndarray): Input array to rescale.
+        new_min (float): New minimum value.
+        new_max (float): New maximum value.
 
     Returns:
-        np.ndarray: 2D array containing Perlin noise values.
+        np.ndarray: Rescaled array.
     """
-    noise_array = np.zeros(size, dtype=np.float32)
-    p = _generate_permutation(seed)
-
-    # Generate noise with multiple octaves
-    scale = 100.0
-    persistence = 0.5
-
-    # This loops can't be jitted as a whole due to function call restrictions
-    for i in range(size[0]):
-        for j in range(size[1]):
-            frequency = start_frequency
-            total = 0.0
-            amplitude = 1.0
-            max_value = 0.0
-
-            for _ in range(octave):
-                total += (
-                    _perlin2d(i * frequency / scale, j * frequency / scale, p)
-                    * amplitude
-                )
-                max_value += amplitude
-                amplitude *= persistence
-                frequency *= 2.0
-
-            # Normalize and store
-            noise_array[i, j] = total / max_value
-
-    return noise_array
+    return (x - np.min(x)) / (np.max(x) - np.min(x)) * (new_max - new_min) + new_min
 
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
-    noise = generate_perlin_noise(0, (1024, 512), 4)
+    noise = generate_perlin_noise(0.01, 0.02, (100, 100))
     plt.imshow(noise, cmap="gray")
     plt.show()

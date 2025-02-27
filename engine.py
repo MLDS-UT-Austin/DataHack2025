@@ -6,7 +6,7 @@ from numba import float32, float64, int32, int64, types
 from numba.experimental import jitclass
 from numba.typed import List
 
-from util import generate_perlin_noise
+from util import generate_perlin_noise, rescale
 
 # Global Constants
 # grid width (cells)
@@ -56,6 +56,10 @@ spec = [
     ("vc", float32),
     ("d_max", float32),
     ("base_map", float64[:, :]),
+    ("base_map_scale", float64),
+    ("base_map_freq", float64),
+    ("base_map_octaves", int64),
+    ("base_map_alpha", float64),
     ("seasonal_map", float64[:, :]),
     ("land_map", int64[:, :]),
     ("air_temp", float32[:, :]),
@@ -69,9 +73,11 @@ class LBMEngine:
         self,
         land_map,
         seasonal_map,
-        base_map_scale=0.003,
+        # base_map_scale=0.007,
+        base_map_scale=0.001,
         base_map_freq=4.0,
         base_map_octaves=2,
+        base_map_alpha=0.0001,
         dt=0.08,
         particle_lifetime=40.0,
         particle_spawn_acc=0.0,
@@ -108,17 +114,24 @@ class LBMEngine:
         self.vc = vc
         self.d_max = d_max
 
-        self.base_map = (
-            generate_perlin_noise(
-                random.randint(0, 100000), (NY, NX), base_map_octaves, base_map_freq
-            )
-            * base_map_scale
-        )
-        # code to generate base_map
-        # self.seasonal_map = (
-        #     generate_perlin_noise(random.randint(0, 100000), (NY, NX), 2, 2.5) * base_map_scale
+        self.base_map_scale = base_map_scale
+        self.base_map_freq = base_map_freq
+        self.base_map_octaves = base_map_octaves
+        self.base_map_alpha = base_map_alpha
+        # self.base_map = (
+        #     generate_perlin_noise(
+        #         random.randint(0, 100000), (NY, NX), self.base_map_octaves, self.base_map_freq
+        #     ).astype(np.float64)
         # )
-        self.seasonal_map = seasonal_map
+        # self.base_map = rescale(self.base_map, -base_map_scale, base_map_scale)
+        self.base_map = generate_perlin_noise(0.01, 0.05, (NY, NX))
+
+        # code to generate seasonal_map
+        self.seasonal_map = generate_perlin_noise(0.01, 0.02, (NY, NX))
+        # self.seasonal_map = (
+        #     generate_perlin_noise(random.randint(0, 100000), (NY, NX), 2, 1.5) * base_map_scale
+        # )
+        # self.seasonal_map = seasonal_map
         self.land_map = land_map
 
         self.air_temp = np.zeros((NY, NX), dtype=np.float32)
@@ -129,9 +142,14 @@ class LBMEngine:
                 self.sim_state[j, i, :] = weights
 
     def step(self):
-        self._step_lbm()
+        for _ in range(5):
+            self._step_lbm()
         self._step_particles()
+        self._step_base_map()
+        if self.current_month >= 12:
+            self.current_year = self.current_year + 1
         self.current_month = (self.current_month + self.dt * 0.2) % 12
+        # self.current_month = (self.current_month + self.dt * 0.5) % 12
 
     def _step_lbm(self):
         # (1) Compute macroscopic variables and equilibrium distribution
@@ -254,7 +272,6 @@ class LBMEngine:
         def shift_array(arr, shift):
             return np.concatenate((arr[:, -shift:], arr[:, :-shift]), axis=1)
 
-        # print(sim_step_count, self.dt, GLOBAL_WIND, NX)
         if previous_mod > current_mod:
             shift = np.int64(current_mod - previous_mod)
             self.sim_state = shift_array(self.sim_state, shift)
@@ -264,14 +281,14 @@ class LBMEngine:
 
     def _step_particles(self):
         speed_factor = 200
-        for i in range(len(self.particles)):
+        i = 0
+        for _ in range(len(self.particles)):
             p = self.particles[i]
             x, y, dt, trail = p[0], p[1], p[2], p[3]
             trail.append((p[0], p[1]))
             gx = x / cell_size
             gy = y / cell_size
             vx, vy = self.get_velocity_at(gx, gy)
-            # print(vx * speed_factor * self.dt)
             x += vx * speed_factor * self.dt
             y += vy * speed_factor * self.dt
             # Periodic boundaries
@@ -288,10 +305,21 @@ class LBMEngine:
                 del self.particles[i]
             else:
                 self.particles[i] = (x, y, dt, trail)
+                i+=1
         self.particle_spawn_acc += self.dt * self.spawn_rate
         while self.particle_spawn_acc >= 1:
             self.spawn_particle()
             self.particle_spawn_acc -= 1
+
+    def _step_base_map(self):
+        return
+        new_noise = (
+            generate_perlin_noise(
+                random.randint(0, 100000), (NY, NX), self.base_map_octaves, self.base_map_freq
+            ).astype(np.float64)
+        )
+        self.base_map = self.base_map * (1 - self.base_map_alpha) + new_noise * self.base_map_alpha
+        self.base_map = rescale(self.base_map, -self.base_map_scale, self.base_map_scale)
 
     def get_velocity_at(self, gx, gy):
         # Bilinear interpolation of cell velocities
@@ -325,7 +353,6 @@ class LBMEngine:
             + di * dj * v11[1]
         )
         ux += self.global_wind
-        # print(ux, uy)
         return ux, uy
 
     def get_velocity_field(self):
