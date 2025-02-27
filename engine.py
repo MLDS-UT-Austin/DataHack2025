@@ -30,14 +30,13 @@ spec = [
     ("current_month", float32),
     ("current_year", int32),
     ("dt", float32),
-    ("trail_length", int32),
     (
         "particles",
         types.ListType(
             types.Tuple(
                 (
-                    int64,
-                    int64,
+                    float64,
+                    float64,
                     float64,
                     types.ListType(types.Tuple((float64, float64))),
                 )
@@ -47,15 +46,11 @@ spec = [
     ("particle_lifetime", float32),
     ("particle_spawn_acc", float32),
     ("global_wind", float32),
-    ("steps_per_frame", int32),
     ("viscosity", float32),
     ("tau", float32),
     ("damping", float32),
     ("noise_amplitude", float32),
-    ("noise_scale", float32),
-    ("tail_length", float32),
     ("spawn_rate", float32),
-    ("D_const", float32),
     ("k_const", float32),
     ("dpdt", float32),
     ("vc", float32),
@@ -63,7 +58,6 @@ spec = [
     ("base_map", float64[:, :]),
     ("seasonal_map", float64[:, :]),
     ("land_map", int64[:, :]),
-    ("seasonal_effects", float32[:]),
     ("air_temp", float32[:, :]),
     ("sim_state", float32[:, :, :]),
 ]
@@ -71,56 +65,62 @@ spec = [
 
 @jitclass(spec)
 class LBMEngine:
-    def __init__(self, land_map):
+    def __init__(
+        self,
+        land_map,
+        seasonal_map,
+        base_map_scale=0.003,
+        base_map_freq=4.0,
+        base_map_octaves=2,
+        dt=0.08,
+        particle_lifetime=40.0,
+        particle_spawn_acc=0.0,
+        global_wind=-0.1,
+        viscosity=0.04,
+        damping=0.02,
+        spawn_rate=100,
+        k_const=0.0007,
+        dpdt=30000.0,
+        vc=1.0,
+        d_max=0.005,
+    ):
+
         self.sim_step_count = 0
         self.current_month = 0
-        self.current_year = 1955
-        self.dt = 0.08
-        self.trail_length = 5
+        self.current_year = 0
+        self.dt = dt
         trail_list = List.empty_list((0.0, 0.0))
-        self.particles = List.empty_list((0, 0, 0.0, trail_list))
+        self.particles = List.empty_list((0.0, 0.0, 0.0, trail_list))
 
-        self.particle_lifetime = 40.0
-        self.particle_spawn_acc = 0.0
-        self.global_wind = -0.1
-        self.steps_per_frame = 5  # LBM steps per animation frame
-
-        # LBM lattice directions and weights (D2Q9)
+        self.particle_lifetime = particle_lifetime
+        self.particle_spawn_acc = particle_spawn_acc
+        self.global_wind = global_wind
 
         # Fluid simulation parameters
-        self.viscosity = 0.04
-        self.tau = self.viscosity * 3 + 0.5
-        self.damping = 0.02
-        self.noise_amplitude = 0.01
-        self.noise_scale = 0.05
-        self.tail_length = 10.0
-        self.spawn_rate = 100
+        self.viscosity = viscosity
+        self.tau = viscosity * 3 + 0.5
+        self.damping = damping
+        self.spawn_rate = spawn_rate
 
         # Thermal parameters
-        self.D_const = 0.0
-        self.k_const = 0.0007
-        # dpdt = 300.0
-        self.dpdt = 30000.0
-        self.vc = 1.0
-        self.d_max = 0.005
+        self.k_const = k_const
+        self.dpdt = dpdt
+        self.vc = vc
+        self.d_max = d_max
 
         self.base_map = (
-            generate_perlin_noise(random.randint(0, 100000), (NY, NX), 8) * 0.01
+            generate_perlin_noise(
+                random.randint(0, 100000), (NY, NX), base_map_octaves, base_map_freq
+            )
+            * base_map_scale
         )
-        self.seasonal_map = (
-            generate_perlin_noise(random.randint(0, 100000), (NY, NX), 8) * 0.01
-        )
+        # code to generate base_map
+        # self.seasonal_map = (
+        #     generate_perlin_noise(random.randint(0, 100000), (NY, NX), 2, 2.5) * base_map_scale
+        # )
+        self.seasonal_map = seasonal_map
         self.land_map = land_map
 
-        # Initial seasonal effect values
-        def seasonal_sine_wave(month):
-            """Generate seasonal effect using a sine wave (peaks in summer)"""
-            # Shifted and scaled sine wave: peaks at month ~7 (July)
-            return 0.5 * (1 + np.sin((month / 12.0 * 2 * np.pi) - np.pi / 2))
-
-        self.seasonal_effects = np.array(
-            [seasonal_sine_wave(m) for m in range(12)], dtype=np.float32
-        )
         self.air_temp = np.zeros((NY, NX), dtype=np.float32)
         self.sim_state = np.empty((NY, NX, 9), dtype=np.float32)
         # Initialize with equilibrium values (ρ = 1, u = 0)
@@ -245,16 +245,11 @@ class LBMEngine:
                     ) * (1 - self.damping * self.dt)
         # (9) Update air temperature field
         self.air_temp[:, :] = t_final_array
-        self.sim_step_count += self.steps_per_frame
+        self.sim_step_count += 1
 
         # shift everything by the global wind
-        previous_mod = int(
-            (self.sim_step_count - self.steps_per_frame)
-            * self.dt
-            * self.global_wind
-            % NX
-        )
-        current_mod = int(self.sim_step_count * self.dt * self.global_wind % NX)
+        previous_mod = int((self.sim_step_count - 1) * 5 * self.dt * self.global_wind % NX)
+        current_mod = int(self.sim_step_count * 5 * self.dt * self.global_wind % NX)
 
         def shift_array(arr, shift):
             return np.concatenate((arr[:, -shift:], arr[:, :-shift]), axis=1)
@@ -276,8 +271,9 @@ class LBMEngine:
             gx = x / cell_size
             gy = y / cell_size
             vx, vy = self.get_velocity_at(gx, gy)
-            x += int(vx * speed_factor * self.dt)
-            y += int(vy * speed_factor * self.dt)
+            # print(vx * speed_factor * self.dt)
+            x += vx * speed_factor * self.dt
+            y += vy * speed_factor * self.dt
             # Periodic boundaries
             if x < 0:
                 x += NX * cell_size
@@ -289,8 +285,9 @@ class LBMEngine:
                 y -= NY * cell_size
             dt += self.dt
             if dt > self.particle_lifetime:
-                self.particles.remove(p)
-            self.particles[i] = (x, y, dt, trail)
+                del self.particles[i]
+            else:
+                self.particles[i] = (x, y, dt, trail)
         self.particle_spawn_acc += self.dt * self.spawn_rate
         while self.particle_spawn_acc >= 1:
             self.spawn_particle()
@@ -328,6 +325,7 @@ class LBMEngine:
             + di * dj * v11[1]
         )
         ux += self.global_wind
+        # print(ux, uy)
         return ux, uy
 
     def get_velocity_field(self):
@@ -348,8 +346,8 @@ class LBMEngine:
     def spawn_particle(self):
         self.particles.append(
             (
-                int(random.random() * NX * cell_size),
-                int(random.random() * NY * cell_size),
+                random.random() * NX * cell_size,
+                random.random() * NY * cell_size,
                 0.0,
                 List.empty_list((0.0, 0.0)),
             )

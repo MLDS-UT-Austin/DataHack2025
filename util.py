@@ -61,7 +61,7 @@ def _generate_permutation(seed):
 
 
 @njit
-def generate_perlin_noise(seed: int, size: Tuple[int, int], octave: int) -> np.ndarray:
+def generate_perlin_noise(seed: int, size: Tuple[int, int], octave: int, start_frequency: float) -> np.ndarray:
     """
     Generate a 2D Perlin noise array with Numba support.
 
@@ -83,8 +83,8 @@ def generate_perlin_noise(seed: int, size: Tuple[int, int], octave: int) -> np.n
     # This loops can't be jitted as a whole due to function call restrictions
     for i in range(size[0]):
         for j in range(size[1]):
+            frequency = start_frequency
             total = 0.0
-            frequency = 1.0
             amplitude = 1.0
             max_value = 0.0
 
