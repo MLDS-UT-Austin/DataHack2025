@@ -3,6 +3,8 @@ import random
 
 import numpy as np
 from numba import float32, float64, int32, int64, types
+from identify_hurricanes import identify_hurricanes
+
 from numba.experimental import jitclass
 from numba.typed import List
 
@@ -412,3 +414,11 @@ class LBMEngine:
                 List.empty_list((0.0, 0.0)),
             )
         )
+
+    def identify_hurricanes(self, threshold=0.02):
+        x_vel, y_vel = self.get_velocity_field()
+        h_centers, h_sizes, h_indicator = identify_hurricanes(
+            x_vel, y_vel, threshold=threshold
+        )
+        h_indicator /= 0.02
+        return h_centers, h_sizes, h_indicator

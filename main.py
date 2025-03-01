@@ -85,20 +85,13 @@ class Visualizer:
                 else:
                     color = (0, 255 * scale, 0)  # Blue for water
 
-                # color = (255 * scale, 255 * scale, 255 * scale)  # Blue for water
-
                 pygame.draw.rect(
                     self.screen,
                     color,
                     (i * cell_size, j * cell_size, cell_size, cell_size),
                 )
 
-        x_vel, y_vel = self.get_velocity_field()
-        h_centers, h_sizes, h_indicator = identify_hurricanes(
-            x_vel, y_vel, threshold=0.02
-        )
-
-        h_indicator /= 0.02
+        h_centers, h_sizes, h_indicator = self.identify_hurricanes(threshold=0.02)
 
         # draw h_indicator grid
         # for j in range(NY):
