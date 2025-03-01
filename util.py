@@ -125,3 +125,139 @@ if __name__ == "__main__":
     noise = generate_perlin_noise(0.01, 0.02, (100, 100))
     plt.imshow(noise, cmap="gray")
     plt.show()
+
+@njit
+def sobel(x, axis):
+    """
+    Apply Sobel filter along specified axis using numba.
+    
+    Parameters:
+    -----------
+    x : 2D numpy array
+        Input array to filter
+    axis : int
+        Axis along which to compute gradient (0 for y-direction, 1 for x-direction)
+    
+    Returns:
+    --------
+    2D numpy array
+        Filtered array
+    """
+    rows, cols = x.shape
+    result = np.zeros_like(x)
+    
+    if axis == 0:  # y-direction
+        for i in range(1, rows-1):
+            for j in range(1, cols-1):
+                result[i, j] = (
+                    x[i+1, j-1] + 2 * x[i+1, j] + x[i+1, j+1] -
+                    x[i-1, j-1] - 2 * x[i-1, j] - x[i-1, j+1]
+                )
+    elif axis == 1:  # x-direction
+        for i in range(1, rows-1):
+            for j in range(1, cols-1):
+                result[i, j] = (
+                    x[i-1, j+1] + 2 * x[i, j+1] + x[i+1, j+1] -
+                    x[i-1, j-1] - 2 * x[i, j-1] - x[i+1, j-1]
+                )
+    
+    return result
+
+
+@njit
+def gaussian_filter(x, sigma):
+    """
+    Apply a Gaussian filter to a 2D array using numba.
+    
+    Parameters:
+    -----------
+    x : 2D numpy array
+        Input array to filter
+    sigma : float
+        Standard deviation of the Gaussian kernel
+    
+    Returns:
+    --------
+    2D numpy array
+        Filtered array
+    """
+    rows, cols = x.shape
+    result = np.zeros_like(x)
+    
+    # Calculate kernel size based on sigma (typically 3*sigma on each side)
+    kernel_size = max(int(6 * sigma + 1), 3)
+    if kernel_size % 2 == 0:  # Make sure kernel size is odd
+        kernel_size += 1
+    
+    # Create Gaussian kernel
+    kernel = np.zeros((kernel_size, kernel_size))
+    center = kernel_size // 2
+    sum_val = 0.0
+    
+    # Fill the kernel
+    for i in range(kernel_size):
+        for j in range(kernel_size):
+            x_dist = j - center
+            y_dist = i - center
+            kernel[i, j] = np.exp(-(x_dist**2 + y_dist**2) / (2 * sigma**2))
+            sum_val += kernel[i, j]
+    
+    # Normalize the kernel
+    if sum_val > 0:
+        kernel /= sum_val
+    
+    # Apply convolution
+    pad = kernel_size // 2
+    for i in range(rows):
+        for j in range(cols):
+            val = 0.0
+            for ki in range(kernel_size):
+                for kj in range(kernel_size):
+                    ni = i + ki - pad
+                    nj = j + kj - pad
+                    if 0 <= ni < rows and 0 <= nj < cols:
+                        val += x[ni, nj] * kernel[ki, kj]
+            result[i, j] = val
+    
+    return result
+
+@njit
+def maximum_filter(x, size):
+    """
+    Apply a maximum filter to a 2D array using numba.
+    
+    Parameters:
+    -----------
+    x : 2D numpy array
+        Input array to filter
+    size : int
+        Size of the filter window
+    
+    Returns:
+    --------
+    2D numpy array
+        Filtered array where each pixel is the maximum value in its neighborhood
+    """
+    rows, cols = x.shape
+    result = np.zeros_like(x)
+    
+    # Half size of the window
+    half_size = size // 2
+    
+    # Apply the filter
+    for i in range(rows):
+        for j in range(cols):
+            max_val = x[i, j]  # Start with current pixel
+            
+            # Check all neighbors within the window
+            for di in range(-half_size, half_size + 1):
+                for dj in range(-half_size, half_size + 1):
+                    ni, nj = i + di, j + dj
+                    
+                    # Check if the neighbor is within bounds
+                    if 0 <= ni < rows and 0 <= nj < cols:
+                        max_val = max(max_val, x[ni, nj])
+            
+            result[i, j] = max_val
+    
+    return result

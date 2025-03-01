@@ -25,7 +25,7 @@ weights = np.array(
 )
 
 
-spec = [
+engine_spec = [
     ("sim_step_count", int32),
     ("current_month", float32),
     ("current_year", int32),
@@ -55,6 +55,9 @@ spec = [
     ("dpdt", float32),
     ("vc", float32),
     ("d_max", float32),
+    ("rho_min", float32),
+    ("mom_max", float32),
+    ("state_max", float32),
     ("base_map", float64[:, :]),
     ("base_map_scale", float64),
     ("base_map_freq", float64),
@@ -67,7 +70,7 @@ spec = [
 ]
 
 
-@jitclass(spec)
+@jitclass(engine_spec)
 class LBMEngine:
     def __init__(
         self,
@@ -82,13 +85,16 @@ class LBMEngine:
         particle_lifetime=40.0,
         particle_spawn_acc=0.0,
         global_wind=-0.1,
-        viscosity=0.04,
+        viscosity=0.08,
         damping=0.02,
         spawn_rate=100,
         k_const=0.0007,
         dpdt=30000.0,
         vc=1.0,
         d_max=0.005,
+        rho_min=0.2,
+        mom_max=0.5,
+        state_max=1.0,
     ):
 
         self.sim_step_count = 0
@@ -113,6 +119,9 @@ class LBMEngine:
         self.dpdt = dpdt
         self.vc = vc
         self.d_max = d_max
+        self.rho_min = rho_min
+        self.mom_max = mom_max
+        self.state_max = state_max
 
         self.base_map_scale = base_map_scale
         self.base_map_freq = base_map_freq
@@ -161,6 +170,9 @@ class LBMEngine:
                 rho = np.sum(self.sim_state[j, i, :])
                 mom_x = np.sum(self.sim_state[j, i, :] * ex)
                 mom_y = np.sum(self.sim_state[j, i, :] * ey)
+                rho = max(rho, self.rho_min)
+                mom_x = max(min(mom_x, self.mom_max), -self.mom_max)
+                mom_y = max(min(mom_y, self.mom_max), -self.mom_max)
                 ux = mom_x / rho
                 uy = mom_y / rho
                 cell_vel[j][i] = (ux, uy)
@@ -236,6 +248,9 @@ class LBMEngine:
                 S_array[j, i] = S_val
                 t_final_array[j, i] = inc + t_diff
 
+        feq = np.clip(feq, -self.state_max, self.state_max)
+        S_array = np.clip(S_array, -self.state_max, self.state_max)
+
         # (6) Collision step
         for j in range(NY):
             for i in range(NX):
@@ -245,6 +260,10 @@ class LBMEngine:
                         - (self.sim_state[j, i, k] - feq[j, i, k]) / self.tau
                         + S_array[j, i] * weights[k]
                     )
+
+        self.sim_state = np.clip(self.sim_state, -self.state_max, self.state_max)
+
+
         # (7) Streaming step (propagate distributions)
         f_temp = np.empty_like(self.sim_state)
         for j in range(NY):
@@ -266,7 +285,9 @@ class LBMEngine:
         self.sim_step_count += 1
 
         # shift everything by the global wind
-        previous_mod = int((self.sim_step_count - 1) * 5 * self.dt * self.global_wind % NX)
+        previous_mod = int(
+            (self.sim_step_count - 1) * 5 * self.dt * self.global_wind % NX
+        )
         current_mod = int(self.sim_step_count * 5 * self.dt * self.global_wind % NX)
 
         def shift_array(arr, shift):
@@ -305,7 +326,8 @@ class LBMEngine:
                 del self.particles[i]
             else:
                 self.particles[i] = (x, y, dt, trail)
-                i+=1
+                i += 1
+
         self.particle_spawn_acc += self.dt * self.spawn_rate
         while self.particle_spawn_acc >= 1:
             self.spawn_particle()
@@ -313,13 +335,18 @@ class LBMEngine:
 
     def _step_base_map(self):
         return
-        new_noise = (
-            generate_perlin_noise(
-                random.randint(0, 100000), (NY, NX), self.base_map_octaves, self.base_map_freq
-            ).astype(np.float64)
+        new_noise = generate_perlin_noise(
+            random.randint(0, 100000),
+            (NY, NX),
+            self.base_map_octaves,
+            self.base_map_freq,
+        ).astype(np.float64)
+        self.base_map = (
+            self.base_map * (1 - self.base_map_alpha) + new_noise * self.base_map_alpha
         )
-        self.base_map = self.base_map * (1 - self.base_map_alpha) + new_noise * self.base_map_alpha
-        self.base_map = rescale(self.base_map, -self.base_map_scale, self.base_map_scale)
+        self.base_map = rescale(
+            self.base_map, -self.base_map_scale, self.base_map_scale
+        )
 
     def get_velocity_at(self, gx, gy):
         # Bilinear interpolation of cell velocities
@@ -353,6 +380,12 @@ class LBMEngine:
             + di * dj * v11[1]
         )
         ux += self.global_wind
+
+        # if vel > 1, normalize
+        if math.sqrt(ux ** 2 + uy ** 2) > 1:
+            norm = math.sqrt(ux ** 2 + uy ** 2)
+            ux /= norm
+            uy /= norm
         return ux, uy
 
     def get_velocity_field(self):

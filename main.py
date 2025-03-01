@@ -1,11 +1,13 @@
 import math
 import pickle
 
+import numba
 import numpy as np
 import pygame
-
-from engine import NX, NY, LBMEngine, cell_size
 from identify_hurricanes import identify_hurricanes
+from numba.typed import List
+
+from engine import NX, NY, LBMEngine, cell_size, engine_spec
 
 CITIES = [
     dict(name="Sparseville", x=63, y=35),
@@ -37,7 +39,7 @@ base_year = 1955
 
 class Visualizer:
     def __init__(self, sim):
-        self.sim = sim
+        self.engine = sim
         pygame.init()
         self.screen = pygame.display.set_mode(
             (NX * cell_size, NY * cell_size), depth=32
@@ -45,23 +47,25 @@ class Visualizer:
         pygame.display.set_caption("LBM Fluid Simulation – Python Port")
         self.trail_length = 5
 
+    def step(self):
+        self.engine.step()
+        self.draw()
+
     def run(self):
         while True:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     return
-            self.sim.step()
-            self.draw()
+            self.step()
 
     def __getattribute__(self, name):
         try:
             return super().__getattribute__(name)
         except AttributeError:
-            return self.sim.__getattribute__(name)
+            return self.engine.__getattribute__(name)
 
     def draw(self):
-
         # Draw land map (blue for water, green for land)
         seasonal_scale = (
             -0.5 * math.cos(self.current_month / 12 * math.pi * 2) + 0.5
@@ -76,12 +80,12 @@ class Visualizer:
                 scale = (T + 0.02) / 0.04
                 scale = max(0, min(1, scale))
 
-                # if self.land_map[j, i] == 0:
-                #     color = (0, 0, 255 * scale)  # Blue for water
-                # else:
-                #     color = (0, 255 * scale, 0)  # Blue for water
+                if self.land_map[j, i] == 0:
+                    color = (0, 0, 255 * scale)  # Blue for water
+                else:
+                    color = (0, 255 * scale, 0)  # Blue for water
 
-                color = (255 * scale, 255 * scale, 255 * scale)  # Blue for water
+                # color = (255 * scale, 255 * scale, 255 * scale)  # Blue for water
 
                 pygame.draw.rect(
                     self.screen,
@@ -91,12 +95,12 @@ class Visualizer:
 
         x_vel, y_vel = self.get_velocity_field()
         h_centers, h_sizes, h_indicator = identify_hurricanes(
-            x_vel, y_vel, threshold=0.01
+            x_vel, y_vel, threshold=0.02
         )
 
-        # h_indicator /= 0.01
+        h_indicator /= 0.02
 
-        # # draw h_indicator grid
+        # draw h_indicator grid
         # for j in range(NY):
         #     for i in range(NX):
         #         scale = (h_indicator[j, i] + 0.02) / 0.04
@@ -109,8 +113,6 @@ class Visualizer:
         #         )
 
         for (h_y, h_x), h_radius in zip(h_centers, h_sizes):
-            h_radius *= 200
-            # print(h_x, h_y, h_radius)
             pygame.draw.circle(
                 self.screen,
                 (0, 255, 0),
@@ -162,6 +164,44 @@ class Visualizer:
 
         pygame.display.flip()
 
+    def save_state(self, filename):
+        def recursive_convert(obj):
+            if isinstance(obj, numba.typed.typedlist.List):
+                return [recursive_convert(x) for x in obj]
+            if isinstance(obj, tuple):
+                return tuple(recursive_convert(x) for x in obj)
+            return obj
+
+        attributes = [x[0] for x in engine_spec]
+        state = {attr: recursive_convert(getattr(self, attr)) for attr in attributes}
+
+        with open(filename, "wb") as f:
+            pickle.dump(state, f)
+
+    def load_state(self, filename):
+        with open(filename, "rb") as f:
+            state = pickle.load(f)
+
+        for _ in range(len(self.particles)):
+            del self.particles[0]
+
+        for p in state["particles"]:
+            from numba import types
+
+            trail = List.empty_list(types.UniTuple(types.float64, 2))
+            for t in p[3]:
+                trail.append(t)
+            self.particles.append((p[0], p[1], p[2], trail))
+
+        del state["particles"]
+
+        for attr, value in state.items():
+            setattr(self.engine, attr, value)
+
+
+# list(Tuple(float64, float64, float64, reflected list(UniTuple(float64 x 2))<iv=None>))
+# ListType[Tuple(float64, float64, float64, ListType[UniTuple(float64 x 2)])]:
+
 
 # Load land map outside of the jitclass
 land_map = np.load("land_map.npy")
@@ -171,39 +211,14 @@ seasonal_map = np.load("seasonal_map.npy")
 engine = LBMEngine(land_map, seasonal_map)
 
 sim = Visualizer(engine)
-sim.run()
+sim.load_state("state.pkl")
+sim.engine.viscosity = 0.08
+sim.engine.tau = sim.engine.viscosity * 3 + 0.5
 
-# current_base_map = engine.base_map
-
-# # np.save("seasonal_map.npy", current_base_map)
-
-# import matplotlib.pyplot as plt
-
-# # Plot the base_map and current_base_map
-# plt.figure(figsize=(12, 6))
-
-# plt.subplot(1, 2, 1)
-# plt.imshow(seasonal_map, cmap='coolwarm')
-# plt.colorbar(label='Temperature')
-# plt.title('seasonal_map')
-
-# plt.subplot(1, 2, 2)
-# plt.imshow(current_base_map, cmap='coolwarm')
-# plt.colorbar(label='Temperature')
-# plt.title('Current Base Map')
-
-# plt.tight_layout()
-# plt.savefig('temperature_maps.png')
-# plt.show()
-
-
-# Initialize the visualizer with the engine
-# sim = Visualizer(engine)
-# sim.run()
-
-
-# sim = Visualizer(LBMEngine(land_map))
-# sim.run()
+while True:
+    for _ in range(100):
+        sim.step()
+    # sim.save_state("state.pkl")
 
 # class DualLogger:
 #     def __init__(self, data_log_file="logs/data.log", output_log_file="data/output.log"):
