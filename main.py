@@ -91,7 +91,7 @@ class Visualizer:
                     (i * cell_size, j * cell_size, cell_size, cell_size),
                 )
 
-        h_centers, h_sizes, h_indicator = self.identify_hurricanes(threshold=0.02)
+        h_centers, h_sizes, h_indicator = self.identify_hurricanes(0.02)
 
         # draw h_indicator grid
         # for j in range(NY):
@@ -204,7 +204,7 @@ seasonal_map = np.load("seasonal_map.npy")
 engine = LBMEngine(land_map, seasonal_map)
 
 sim = Visualizer(engine)
-sim.load_state("state.pkl")
+# sim.load_state("state.pkl")
 sim.engine.viscosity = 0.08
 sim.engine.tau = sim.engine.viscosity * 3 + 0.5
 
