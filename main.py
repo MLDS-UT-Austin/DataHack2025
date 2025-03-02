@@ -8,6 +8,19 @@ from identify_hurricanes import identify_hurricanes
 from numba.typed import List
 
 from engine import NX, NY, LBMEngine, cell_size, engine_spec
+clock = pygame.time.Clock()
+
+
+import csv  # add at the top if not already imported
+
+# Global logging lists:
+hurricane_log = []   # each record: [sim_step, hurricane_id, center_x, center_y, avg_velocity, max_velocity]
+station_log = []     # each record: [sim_step, city_name, pressure, air_temp, ground_temp, vel_x, vel_y]
+
+# Global hurricane tracking (to keep the same id across timesteps)
+tracked_hurricanes = {}  # mapping: hurricane_id -> (last_center_y, last_center_x)
+hurricane_id_counter = 0
+
 
 CITIES = [
     dict(name="Sparseville", x=63, y=35),
@@ -50,14 +63,37 @@ class Visualizer:
     def step(self):
         self.engine.step()
         self.draw()
+        self.log_data() # log every step (log_data() itself only acts every 10 steps)
 
     def run(self):
+        clock = pygame.time.Clock()
+        # Set auto-save interval in milliseconds (e.g., 60000ms = 60 seconds)
+        save_interval = 60000  
+        last_save_time = pygame.time.get_ticks()
+
         while True:
+            # Process events
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     return
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_s:  # manual save on 's' key
+                        save_logs_to_csv()
+                        print("Manual save triggered.")
+
+            # Automatic save after the specified interval
+            current_time = pygame.time.get_ticks()
+            if current_time - last_save_time >= save_interval:
+                save_logs_to_csv()
+                last_save_time = current_time
+                print("Automatic save triggered.")
+
+            # Run simulation step and drawing
             self.step()
+
+            # Limit frame rate (60 FPS should be plenty)
+            clock.tick(60)
 
     def __getattribute__(self, name):
         try:
@@ -191,6 +227,84 @@ class Visualizer:
         for attr, value in state.items():
             setattr(self.engine, attr, value)
 
+    def log_data(self):
+        # Only log every 10 simulation steps.
+        if self.engine.sim_step_count % 10 != 0:
+            return
+
+        global hurricane_log, station_log, tracked_hurricanes, hurricane_id_counter
+        step = self.engine.sim_step_count
+
+        ### Log Hurricanes ###
+        # Get hurricane centers and sizes from the engine.
+        h_centers, h_sizes, _ = self.engine.identify_hurricanes()
+        # Get the velocity field.
+        x_vel, y_vel = self.engine.get_velocity_field()
+        # Compute the magnitude field.
+        mag = np.sqrt(x_vel**2 + y_vel**2)
+
+        for center, size in zip(h_centers, h_sizes):
+            # center is (row, col) => (y, x) in grid coordinates
+            y_center, x_center = center
+            # Use the hurricane "size" (rounded) as an approximate radius (in grid cells)
+            radius = int(size)
+            # Determine a bounding box (make sure we stay within bounds)
+            y_min = max(0, y_center - radius)
+            y_max = min(mag.shape[0], y_center + radius + 1)
+            x_min = max(0, x_center - radius)
+            x_max = min(mag.shape[1], x_center + radius + 1)
+            region = mag[y_min:y_max, x_min:x_max]
+            avg_vel = np.mean(region) if region.size > 0 else 0
+            max_vel = np.max(region) if region.size > 0 else 0
+
+            # Track the hurricane to assign a persistent id.
+            assigned_id = None
+            for hid, last_center in tracked_hurricanes.items():
+                # Compute distance in grid cells.
+                dist = np.sqrt((last_center[0] - y_center)**2 + (last_center[1] - x_center)**2)
+                if dist < 3:  # threshold distance; adjust as needed
+                    assigned_id = hid
+                    break
+            if assigned_id is None:
+                hurricane_id_counter += 1
+                assigned_id = hurricane_id_counter
+            # Update the tracking dictionary with the current center.
+            tracked_hurricanes[assigned_id] = (y_center, x_center)
+            # Append the record: [step, hurricane_id, center_x, center_y, avg_velocity, max_velocity]
+            hurricane_log.append([step, assigned_id, x_center, y_center, avg_vel, max_vel])
+
+        ### Log Stations (Cities) ###
+        for city in CITIES:
+            # City coordinates are given in pixels; convert to grid indices.
+            grid_x = int(city["x"] // cell_size)
+            grid_y = int(city["y"] // cell_size)
+            # Pressure is approximated as the density (sum over the 9 distributions)
+            pressure = np.sum(self.engine.sim_state[grid_y, grid_x, :])
+            air_temp = self.engine.air_temp[grid_y, grid_x]
+            # Compute ground temperature similar to your draw() method:
+            seasonal_scale = -0.5 * math.cos(self.engine.current_month / 12 * math.pi * 2) + 0.5
+            ground_temp = self.engine.base_map[grid_y, grid_x] + seasonal_scale * self.engine.seasonal_map[grid_y, grid_x]
+            # Get velocity at the station:
+            vel_x, vel_y = self.engine.get_velocity_at(grid_x, grid_y)
+            # Append the record: [step, city_name, pressure, air_temp, ground_temp, vel_x, vel_y]
+            station_log.append([step, city["name"], pressure, air_temp, ground_temp, vel_x, vel_y])
+   
+
+
+
+def save_logs_to_csv():
+    global hurricane_log, station_log
+    with open("hurricanes.csv", "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["step", "hurricane_id", "center_x", "center_y", "avg_velocity", "max_velocity"])
+        writer.writerows(hurricane_log)
+    with open("stations.csv", "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["step", "city", "pressure", "air_temp", "ground_temp", "velocity_x", "velocity_y"])
+        writer.writerows(station_log)
+    print("Logs saved to hurricanes.csv and stations.csv")
+
+
 
 # list(Tuple(float64, float64, float64, reflected list(UniTuple(float64 x 2))<iv=None>))
 # ListType[Tuple(float64, float64, float64, ListType[UniTuple(float64 x 2)])]:
@@ -208,53 +322,16 @@ sim = Visualizer(engine)
 sim.engine.viscosity = 0.08
 sim.engine.tau = sim.engine.viscosity * 3 + 0.5
 
-while True:
-    for _ in range(100):
-        sim.step()
+
+
+sim = Visualizer(engine)
+sim.engine.viscosity = 0.08
+sim.engine.tau = sim.engine.viscosity * 3 + 0.5
+sim.run()
+
+#while True:
+#    for _ in range(100):
+#        sim.step()
     # sim.save_state("state.pkl")
 
-# class DualLogger:
-#     def __init__(self, data_log_file="logs/data.log", output_log_file="data/output.log"):
-#         self.data_logger = self._setup_logger("data_logger", data_log_file, "%(asctime)s - %(levelname)s - %(message)s")
-#         self.output_logger = self._setup_logger("output_logger", output_log_file, "%(message)s")
-#     def _setup_logger(self, name, log_file, format):
-#         logger = logging.getLogger(name)
-#         logger.setLevel(logging.INFO)
-#         # Create file handler
-#         file_handler = logging.FileHandler(log_file)
-#         file_handler.setLevel(logging.INFO)
-#         # Create formatter and add it to the handlers
-# formatter = logging.Formatter()
-#         file_handler.setFormatter(formatter)
 
-#         # Add the handlers to the logger
-#         logger.addHandler(file_handler)
-
-#         return logger
-
-#     def log_data(self, message):
-#         """
-#         Logs a data message.
-
-#         Args:
-#             message (str): The message to log.
-#         """
-#         self.data_logger.info(message)
-
-#     def log_output(self, message):
-#         """
-#         Logs an output message.
-
-#         Args:
-#             message (str): The message to log.
-#         """
-#         self.output_logger.info(message)
-
-#     def close_handlers(self):
-#         """Closes all handlers from both loggers"""
-#         for handler in self.data_logger.handlers[:]:
-#             handler.close()
-#             self.data_logger.removeHandler(handler)
-#         for handler in self.output_logger.handlers[:]:
-#             handler.close()
-#             self.output_logger.removeHandler(handler)

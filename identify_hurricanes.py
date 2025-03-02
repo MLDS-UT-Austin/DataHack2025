@@ -7,7 +7,7 @@ from util import *
 
 
 @njit
-def identify_hurricanes(u_velocity, v_velocity, grid_resolution=1.0, threshold=0.5, size_mult=140, size_max=25):
+def identify_hurricanes(u_velocity, v_velocity, grid_resolution=1.0, threshold=0.8, size_mult=140, size_max=25):
     """
     Identify hurricane-like structures in a velocity field using curl analysis.
 

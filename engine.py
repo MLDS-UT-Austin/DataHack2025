@@ -91,7 +91,7 @@ class LBMEngine:
         damping=0.02,
         spawn_rate=100,
         k_const=0.0007,
-        dpdt=30000.0,
+        dpdt=15000.0,
         vc=1.0,
         d_max=0.005,
         rho_min=0.2,
