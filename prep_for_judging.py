@@ -7,7 +7,7 @@ SCHEDULE_PATH = "schedule.csv"
 DATA_PATH = "output/teams.csv"
 OUTPUT_DIR = "output"  # Directory to save data
 
-OUTPUT_COLS = ["time", "team", "mse", "mse rank", "profit", "profit rank"]
+OUTPUT_COLS = ["time", "team", "repo", "mse", "mse rank", "profit", "profit rank"]
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 

@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 from glob import glob
 
 import pandas as pd  # type: ignore
@@ -42,8 +43,24 @@ for repo in repos:
     submission_df = pd.read_csv(f"{repo}/submission/submission.csv")
     grading_dict = grade(submission=submission_df, answers=answers_df)
 
+    # add GitHub repo link (use git origin remote)
+    try:
+        # Get the git origin URL
+        git_remote = subprocess.check_output(
+            ["git", "-C", repo, "config", "--get", "remote.origin.url"], text=True
+        ).strip()
+        repo_link = git_remote
+    except Exception as e:
+        print(f"Failed to get git remote for {repo}: {e}")
+        repo_link = ""
+
     # Append the team info to the teams_df
-    new_row = {"team_number": team_info["team_number"], **members_dict, **grading_dict}
+    new_row = {
+        "team_number": team_info["team_number"],
+        "repo": repo_link,
+        **members_dict,
+        **grading_dict,
+    }
     teams_list.append(pd.DataFrame([new_row]))
 
 teams_df = pd.concat(teams_list)
