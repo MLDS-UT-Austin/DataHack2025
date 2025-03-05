@@ -1,4 +1,8 @@
 .DS_Store
+.vscode
+submissions
+temp.py
+answers.csv
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
