@@ -13,7 +13,7 @@ Please update, commit, **and push** the following files to your GitHub Classroom
 
 **Due at 3:30 pm:**
 
-- `submission/team_info.json`: Team name, number, and members
+- `submission/team_info.json`: Team number and members
 - `submission/submission.csv`: Velocity magnitude predictions and prices
 
 **Due at 4:00 pm:**
