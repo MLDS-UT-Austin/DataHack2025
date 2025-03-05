@@ -22,6 +22,8 @@ sch_df.columns = sch_df.columns.str.lower()
 data_df = data_df.rename(columns={"team_number": "team"})
 
 # Merge data
+sch_df["team"] = sch_df["team"].astype(int)
+data_df["team"] = data_df["team"].astype(int)
 joined = sch_df.merge(data_df, on="team", how="left")
 
 # Group by room and save to separate files

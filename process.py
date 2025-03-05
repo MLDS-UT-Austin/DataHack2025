@@ -34,6 +34,8 @@ for repo in repos:
 
     # Rename the directory to the team number
     new_repo = f"{SUBMISSION_DIR}/team {team_info['team_number']}"
+    if repo != new_repo:
+        assert not os.path.exists(new_repo)
     os.rename(repo, new_repo)
     repo = new_repo
 
@@ -67,7 +69,7 @@ teams_df = pd.concat(teams_list)
 teams_df.sort_values("team_number", inplace=True)
 
 # rank teams on mse and profit
-teams_df["mse rank"] = teams_df["mse"].rank(ascending=True).astype(int)
-teams_df["profit rank"] = teams_df["profit"].rank(ascending=False).astype(int)
+teams_df["mse rank"] = teams_df["mse"].rank(ascending=True, method="min").astype(int)
+teams_df["profit rank"] = teams_df["profit"].rank(ascending=False, method="min").astype(int)
 
 teams_df.to_csv(f"{OUTPUT_DIR}/teams.csv", index=False)

@@ -61,7 +61,7 @@ def plot(df: pd.DataFrame, savepath: str):
     # Create a figure with two subplots side by side
     fig, axes = plt.subplots(1, 2, figsize=(7, 3))
 
-    # Plot MSE: Box plot with scatter overlay
+    # Plot MSE: Box plot
     sns.boxplot(
         x="team",
         y="val",
@@ -74,7 +74,7 @@ def plot(df: pd.DataFrame, savepath: str):
     axes[0].set_xlabel("Team Number")
     axes[0].set_ylabel("MSE")
 
-    # Plot Profit: Box plot with scatter overlay
+    # Plot Profit: Box plot
     sns.boxplot(
         x="team",
         y="val",
