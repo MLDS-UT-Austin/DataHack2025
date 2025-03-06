@@ -59,6 +59,7 @@ for repo in repos:
     # Append the team info to the teams_df
     new_row = {
         "team_number": team_info["team_number"],
+        "team_name": team_info["team_name"],
         "repo": repo_link,
         **members_dict,
         **grading_dict,
@@ -70,6 +71,8 @@ teams_df.sort_values("team_number", inplace=True)
 
 # rank teams on mse and profit
 teams_df["mse rank"] = teams_df["mse"].rank(ascending=True, method="min").astype(int)
-teams_df["profit rank"] = teams_df["profit"].rank(ascending=False, method="min").astype(int)
+teams_df["profit rank"] = (
+    teams_df["profit"].rank(ascending=False, method="min").astype(int)
+)
 
 teams_df.to_csv(f"{OUTPUT_DIR}/teams.csv", index=False)
