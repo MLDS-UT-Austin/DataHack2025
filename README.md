@@ -4,7 +4,7 @@ Official repository for DataHack 2025
 
 ## Getting Started
 
-1. Join the [Discord Server](https://discord.gg/y9mmZCVA) for resources, announcements, questions, etc.
+1. Join the [Discord Server](https://discord.gg/qKmmB35TM8) for resources, announcements, questions, etc.
 2. Add your teammates to this repo (Settings -> Collaborators -> Add people)
 
 ## Submission
