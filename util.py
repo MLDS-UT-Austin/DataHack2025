@@ -4,8 +4,7 @@ import pandas as pd  # type: ignore
 import seaborn as sns  # type: ignore
 
 
-def get_profit(
-    wind_speed: pd.Series, prices: pd.Series, damages: pd.Series
+def get_profit(prices: pd.Series, damages: pd.Series
 ) -> pd.Series:
     assert (prices >= 0).all()
     demand = 10000 - (10000 / 500) * prices
@@ -32,7 +31,6 @@ def grade(
     # Get profit from the submission
     total_damages = damages[hour_cols].sum(axis=1)
     profits = get_profit(
-        wind_speed=wind_speed_answers["wind_speed"],
         prices=submission["price"],
         damages=total_damages,
     )
