@@ -4,36 +4,38 @@ import pandas as pd  # type: ignore
 import seaborn as sns  # type: ignore
 
 
-def get_damage(wind_speed: pd.Series) -> pd.Series:
-    return np.exp(4 * wind_speed)
-
-
-def get_profit(wind_speed: pd.Series, price: pd.Series) -> pd.Series:
-    assert (price >= 0).all()
-    demand = 10000 - (10000 / 500) * price
-    unit_cm = price - get_damage(wind_speed)
+def get_profit(
+    wind_speed: pd.Series, prices: pd.Series, damages: pd.Series
+) -> pd.Series:
+    assert (prices >= 0).all()
+    demand = 10000 - (10000 / 500) * prices
+    unit_cm = prices - damages
     profit = demand * unit_cm
     return profit
 
 
-def grade(submission: pd.DataFrame, answers: pd.DataFrame) -> dict:
-    wind_speed_cols = [s for s in answers.columns if s.lstrip("-").isdigit()]
+def grade(
+    submission: pd.DataFrame, wind_speed_answers: pd.DataFrame, damages: pd.DataFrame
+) -> dict:
+    hour_cols = [s for s in wind_speed_answers.columns if s.lstrip("-").isdigit()]
 
-    for col in wind_speed_cols:
+    for col in hour_cols:
         assert col in submission.columns
-    assert len(submission) == len(answers)
+    assert len(submission) == len(wind_speed_answers)
 
     # Calculate the mean squared error for each wind speed column
-    mses = submission[wind_speed_cols].sub(answers[wind_speed_cols]).pow(2).mean(axis=1)
+    mses = submission[hour_cols].sub(wind_speed_answers[hour_cols]).pow(2).mean(axis=1)
 
     output = {f"mse_{i}": mse for i, mse in enumerate(mses)}
     output |= {"mse": mses.mean()}
 
     # Get profit from the submission
-    profits_per_day = answers[wind_speed_cols].apply(
-        get_profit, axis=0, price=submission["price"]
+    total_damages = damages[hour_cols].sum(axis=1)
+    profits = get_profit(
+        wind_speed=wind_speed_answers["wind_speed"],
+        prices=submission["price"],
+        damages=total_damages,
     )
-    profits = profits_per_day.sum(axis=1)
 
     output |= {f"profit_{i}": profit for i, profit in enumerate(profits)}
     output |= {"profit": profits.sum()}

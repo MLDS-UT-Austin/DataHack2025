@@ -10,12 +10,14 @@ from util import grade
 SUBMISSION_DIR = "submissions"  # Directory with cloned repos
 OUTPUT_DIR = "output"  # Directory to save the output
 
-ANSWERS_PATH = "answers.csv"
+WIND_SPEED_ANSWERS_PATH = "example_dataset_with_submission_damage/submission.csv"
+DAMAGES_PATH = "example_dataset_with_submission_damage/damages.csv"
 
 os.makedirs(SUBMISSION_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-answers_df = pd.read_csv(ANSWERS_PATH)
+wind_speed_answers_df = pd.read_csv(WIND_SPEED_ANSWERS_PATH)
+damages_df = pd.read_csv(DAMAGES_PATH)
 
 repos = [p for p in glob(f"{SUBMISSION_DIR}/*") if os.path.isdir(p)]
 assert repos
@@ -43,7 +45,11 @@ for repo in repos:
 
     # Grade submission
     submission_df = pd.read_csv(f"{repo}/submission/submission.csv")
-    grading_dict = grade(submission=submission_df, answers=answers_df)
+    grading_dict = grade(
+        submission=submission_df,
+        wind_speed_answers=wind_speed_answers_df,
+        damages=damages_df,
+    )
 
     # add GitHub repo link (use git origin remote)
     try:
