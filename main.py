@@ -13,6 +13,9 @@ clock = pygame.time.Clock()
 
 import csv  # add at the top if not already imported
 
+#import os
+#sos.environ["SDL_VIDEODRIVER"] = "dummy"
+
 # Global logging lists:
 hurricane_log = []   # each record: [sim_step, hurricane_id, center_x, center_y, avg_velocity, max_velocity]
 station_log = []     # each record: [sim_step, city_name, pressure, air_temp, ground_temp, vel_x, vel_y]
@@ -93,7 +96,7 @@ class Visualizer:
             self.step()
 
             # Limit frame rate (60 FPS should be plenty)
-            clock.tick(60)
+            clock.tick(240)
 
     def __getattribute__(self, name):
         try:
@@ -127,6 +130,7 @@ class Visualizer:
                     (i * cell_size, j * cell_size, cell_size, cell_size),
                 )
 
+        '''
         h_centers, h_sizes, h_indicator = self.identify_hurricanes(0.02)
 
         # draw h_indicator grid
@@ -149,8 +153,9 @@ class Visualizer:
                 int(h_radius * cell_size),
                 1,
             )
-
+        '''
         # Draw particle trails (white lines)
+        '''
         for p in self.particles:
             if len(p[3]) > 1:
                 for start in range(
@@ -169,6 +174,7 @@ class Visualizer:
                             (int(x1), int(y1)),
                             1,
                         )
+        '''
 
         # Draw particles (white dots)
         # for p in self.particles:
@@ -235,6 +241,7 @@ class Visualizer:
         global hurricane_log, station_log, tracked_hurricanes, hurricane_id_counter
         step = self.engine.sim_step_count
 
+        '''
         ### Log Hurricanes ###
         # Get hurricane centers and sizes from the engine.
         h_centers, h_sizes, _ = self.engine.identify_hurricanes()
@@ -272,7 +279,8 @@ class Visualizer:
             tracked_hurricanes[assigned_id] = (y_center, x_center)
             # Append the record: [step, hurricane_id, center_x, center_y, avg_velocity, max_velocity]
             hurricane_log.append([step, assigned_id, x_center, y_center, avg_vel, max_vel])
-
+        '''
+        
         ### Log Stations (Cities) ###
         for city in CITIES:
             # City coordinates are given in pixels; convert to grid indices.

@@ -135,10 +135,10 @@ class LBMEngine:
         #     ).astype(np.float64)
         # )
         # self.base_map = rescale(self.base_map, -base_map_scale, base_map_scale)
-        self.base_map = generate_perlin_noise(0.01, 0.05, (NY, NX))
+        self.base_map = generate_perlin_noise(0.01, 0.05, (NY, NX),0)
 
         # code to generate seasonal_map
-        self.seasonal_map = generate_perlin_noise(0.01, 0.02, (NY, NX))
+        self.seasonal_map = generate_perlin_noise(0.01, 0.02, (NY, NX),0)
         # self.seasonal_map = (
         #     generate_perlin_noise(random.randint(0, 100000), (NY, NX), 2, 1.5) * base_map_scale
         # )
@@ -342,6 +342,7 @@ class LBMEngine:
             (NY, NX),
             self.base_map_octaves,
             self.base_map_freq,
+            self.sim_step_count
         ).astype(np.float64)
         self.base_map = (
             self.base_map * (1 - self.base_map_alpha) + new_noise * self.base_map_alpha

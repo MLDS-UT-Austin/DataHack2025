@@ -90,7 +90,7 @@ def _noise(x, y, z):
 
 
 @njit
-def generate_perlin_noise(amplitude:float, scale:float, size: Tuple[int, int]) -> np.ndarray:
+def generate_perlin_noise(amplitude:float, scale:float, size: Tuple[int, int], time:float) -> np.ndarray:
     # def generate_perlin_noise(seed: int, size: Tuple[int, int], octave: int, start_frequency: float) -> np.ndarray:
     x_offset = random.random() * 1000000
     y_offset = random.random() * 1000000
@@ -98,7 +98,7 @@ def generate_perlin_noise(amplitude:float, scale:float, size: Tuple[int, int]) -
     for j in range(size[0]):
         for i in range(size[1]):
             output[j, i] = (
-                _noise(i * scale + x_offset, j * scale + y_offset, 0) * amplitude
+                _noise(i * scale + x_offset, j * scale + y_offset, time) * amplitude
             )
     return output.astype(np.float64)
 
