@@ -14,7 +14,7 @@ Official repository for DataHack 2025
   - `event_1.csv` Data for the first 120 hours of event 1
   - ...
   - `event_10.csv` Data for the first 120 hours of event 10
-  - `training_data.csv` Training data
+  - `training_data.csv` 6 months of training data
 - `submission/` see 'Submission' for more details
   - `slides.pptx`
   - `submission.csv`
