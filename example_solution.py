@@ -62,7 +62,7 @@ def plot_data(X, y):
 def main():
     #We only need the information about GANopolis so only get its information
     data = read_input_data('data/training_data.csv')
-    ganopolis_information = data[data['city'] == 'GANopolis'].sort_values(by=['hours', 'hour_of_day'])
+    ganopolis_information = data[data['city'] == 'GANopolis'].sort_values(by=['hour', 'hour_of_day'])
     print(ganopolis_information.head())
 
     wind_speed_model = build_wind_speed_model(data)
