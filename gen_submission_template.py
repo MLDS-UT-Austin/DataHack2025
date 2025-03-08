@@ -4,8 +4,8 @@ from glob import glob
 
 import pandas as pd
 
-ANSWERS_PATH = "example_dataset_with_submission_damage/submission.csv"
-EVENT_PATHS = "events_students/event_*.csv"
+ANSWERS_PATH = "7am_run/submission.csv"
+EVENT_PATHS = "7am_run/events_students/event_*.csv"
 SAVE_PATH = "../DataHack2025/submission/submission.csv"
 
 CITY="GANopolis"
