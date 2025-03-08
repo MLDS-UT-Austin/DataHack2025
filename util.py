@@ -70,7 +70,7 @@ def plot(df: pd.DataFrame, savepath: str):
         # color="lightgray",
         width=0.2,
     )
-    axes[0].set_title(f"MSE")
+    axes[0].set_title(f"MSE Across Events")
     axes[0].set_xlabel("Team Number")
     axes[0].set_ylabel("MSE")
 
@@ -83,7 +83,7 @@ def plot(df: pd.DataFrame, savepath: str):
         # color="lightgray",
         width=0.2,
     )
-    axes[1].set_title(f"Profit")
+    axes[1].set_title(f"Profit Across Events")
     axes[1].set_xlabel("Team Number")
     axes[1].set_ylabel("Profit")
 
