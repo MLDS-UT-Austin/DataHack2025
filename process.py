@@ -10,8 +10,8 @@ from util import grade
 SUBMISSION_DIR = "submissions"  # Directory with cloned repos
 OUTPUT_DIR = "output"  # Directory to save the output
 
-WIND_SPEED_ANSWERS_PATH = "example_dataset_with_submission_damage/submission.csv"
-DAMAGES_PATH = "example_dataset_with_submission_damage/damages.csv"
+WIND_SPEED_ANSWERS_PATH = "7am_run/submission.csv"
+DAMAGES_PATH = "7am_run/damages.csv"
 
 os.makedirs(SUBMISSION_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)

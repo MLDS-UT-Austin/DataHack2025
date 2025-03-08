@@ -1,0 +1,30 @@
+{
+    "team_number": 1,
+    "team_name": "Justin's Team",
+    "team_members": [
+        {
+            "name": "Justin",
+            "discord_username": "",
+            "eid": "",
+            "email": ""
+        },
+        {
+            "name": "",
+            "discord_username": "",
+            "eid": "",
+            "email": ""
+        },
+        {
+            "name": "",
+            "discord_username": "",
+            "eid": "",
+            "email": ""
+        },
+        {
+            "name": "",
+            "discord_username": "",
+            "eid": "",
+            "email": ""
+        }
+    ]
+}
